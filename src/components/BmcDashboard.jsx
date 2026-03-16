@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { db } from '../firebase'
 import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore'
 import BmcLogin from './BmcLogin'
+import MumbaiAnalyticsMap from './MumbaiAnalyticsMap'
 
 const severityColor = (s) => s === 'High' ? '#FF3B30' : s === 'Medium' ? '#FF9500' : '#34C759'
 const severityBg   = (s) => s === 'High' ? '#FF3B3018' : s === 'Medium' ? '#FF950018' : '#34C75918'
@@ -211,6 +212,8 @@ export default function BmcDashboard() {
               </button>
             ))}
           </div>
+
+          <MumbaiAnalyticsMap complaints={complaints} />
 
           {updateSuccess && <div className="bd-success">✅ Complaint updated successfully!</div>}
           {loading && <div className="bd-spin" />}
