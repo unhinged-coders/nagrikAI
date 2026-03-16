@@ -34,12 +34,11 @@ export default function BmcDashboard() {
     setLoading(true)
     try {
       const q = query(
-        collection(db, 'complaints'),
-        where('ward', '==', officer.ward),
-        where('status', '!=', 'Pending')
-      )
+  collection(db, 'complaints'),
+  where('ward', '==', officer.ward)
+)
       const snap = await getDocs(q)
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) .filter(c => c.status !== 'Pending') 
       list.sort((a, b) => {
         const sevOrder = { High: 0, Medium: 1, Low: 2 }
         if (sevOrder[a.severity] !== sevOrder[b.severity]) return sevOrder[a.severity] - sevOrder[b.severity]
