@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { collection, query, where, getDocs } from 'firebase/firestore'
+import { collection, query, where, getDocs, doc, updateDoc, arrayUnion } from 'firebase/firestore'
 import { db } from '../firebase'
 
 const severityColor = (s) => s === 'High' ? '#FF3B30' : s === 'Medium' ? '#FF9500' : '#34C759'
@@ -19,10 +19,15 @@ const statusColor = (s) => ({
 
 export default function ComplaintPage() {
   const { id } = useParams()
-  const [complaint, setComplaint] = useState(null)
-  const [loading, setLoading]     = useState(true)
-  const [notFound, setNotFound]   = useState(false)
-  const [linkCopied, setLinkCopied] = useState(false)
+  const [complaint, setComplaint]       = useState(null)
+  const [loading, setLoading]           = useState(true)
+  const [notFound, setNotFound]         = useState(false)
+  const [linkCopied, setLinkCopied]     = useState(false)
+  const [canSupport, setCanSupport]     = useState(false)
+  const [alreadySupported, setAlreadySupported] = useState(false)
+  const [supporting, setSupporting]     = useState(false)
+
+  const currentUser = JSON.parse(localStorage.getItem('nagrik_user') || 'null')
 
   useEffect(() => {
     const fetchComplaint = async () => {
@@ -30,7 +35,25 @@ export default function ComplaintPage() {
         const q    = query(collection(db, 'complaints'), where('complaintId', '==', id))
         const snap = await getDocs(q)
         if (snap.empty) { setNotFound(true); setLoading(false); return }
-        setComplaint({ id: snap.docs[0].id, ...snap.docs[0].data() })
+        const data = { id: snap.docs[0].id, ...snap.docs[0].data() }
+        setComplaint(data)
+
+        // Support check
+        if (currentUser) {
+          const alreadyDone = (data.supporters || []).includes(currentUser.id)
+          setAlreadySupported(alreadyDone)
+
+          if (!alreadyDone && data.userId !== currentUser.id) {
+            const q2 = query(
+              collection(db, 'complaints'),
+              where('userId', '==', currentUser.id),
+              where('ward', '==', data.ward),
+              where('issueType', '==', data.issueType)
+            )
+            const snap2 = await getDocs(q2)
+            if (!snap2.empty) setCanSupport(true)
+          }
+        }
       } catch (e) {
         console.error(e)
         setNotFound(true)
@@ -39,6 +62,21 @@ export default function ComplaintPage() {
     }
     fetchComplaint()
   }, [id])
+
+  const handleSupport = async () => {
+    if (!currentUser || alreadySupported || !complaint) return
+    setSupporting(true)
+    try {
+      await updateDoc(doc(db, 'complaints', complaint.id), {
+        supportCount: (complaint.supportCount || 0) + 1,
+        supporters: arrayUnion(currentUser.id)
+      })
+      setComplaint(c => ({ ...c, supportCount: (c.supportCount || 0) + 1 }))
+      setAlreadySupported(true)
+      setCanSupport(false)
+    } catch (e) { console.error(e) }
+    setSupporting(false)
+  }
 
   const currentStep = complaint ? STATUS_STEPS.indexOf(complaint.status) : 0
 
@@ -61,12 +99,11 @@ export default function ComplaintPage() {
         .cp-id-date { font-size: 12px; color: #555; margin-top: 5px; }
         .cp-status-card { background: #141414; border: 1px solid #1E1E1E; border-radius: 18px; padding: 18px 16px; margin-bottom: 14px; }
         .cp-status-title { font-size: 13px; font-weight: 700; margin-bottom: 16px; color: #bbb; }
-        .cp-steps { display: flex; align-items: flex-start; gap: 0; }
+        .cp-steps { display: flex; align-items: flex-start; }
         .cp-step { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; }
         .cp-step-line { position: absolute; top: 13px; left: 50%; width: 100%; height: 2px; background: #222; z-index: 0; }
-        .cp-step-line.done { background: #34C759; }
         .cp-step:last-child .cp-step-line { display: none; }
-        .cp-step-dot { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #222; background: #0D0D0D; display: flex; align-items: center; justify-content: center; font-size: 11px; z-index: 1; position: relative; transition: all 0.3s; }
+        .cp-step-dot { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #222; background: #0D0D0D; display: flex; align-items: center; justify-content: center; font-size: 11px; z-index: 1; position: relative; }
         .cp-step-dot.done { background: #34C759; border-color: #34C759; color: #fff; }
         .cp-step-dot.active { border-color: #FF9500; background: #FF950018; color: #FF9500; }
         .cp-step-label { font-size: 9px; color: #444; margin-top: 7px; text-align: center; line-height: 1.4; }
@@ -89,7 +126,7 @@ export default function ComplaintPage() {
         .cp-support-label { font-size: 12px; color: #555; margin-top: 2px; }
         .cp-before-after { background: #141414; border: 1px solid #1E1E1E; border-radius: 16px; overflow: hidden; margin-bottom: 14px; }
         .cp-ba-title { padding: 12px 16px; font-size: 12px; font-weight: 700; color: #555; letter-spacing: 1px; text-transform: uppercase; border-bottom: 1px solid #1E1E1E; }
-        .cp-ba-imgs { display: flex; gap: 0; }
+        .cp-ba-imgs { display: flex; }
         .cp-ba-side { flex: 1; padding: 12px; }
         .cp-ba-label { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; font-weight: 700; }
         .cp-ba-img { width: 100%; border-radius: 10px; display: block; aspect-ratio: 1; object-fit: cover; }
@@ -115,7 +152,8 @@ export default function ComplaintPage() {
         .cp-404-sub { font-size: 14px; color: #444; line-height: 1.6; }
         .cp-footer { text-align: center; padding: 24px 20px 0; font-size: 11px; color: #2A2A2A; }
         .cp-footer span { color: #FF6B00; }
-        .cp-home-btn { margin-top: 16px; padding: '12px 24px'; background: #FF6B00; color: #fff; border: none; border-radius: 12px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: 'DM Sans', sans-serif; }
+        .cp-home-btn { margin-top: 16px; padding: 12px 24px; background: #FF6B00; color: #fff; border: none; border-radius: 12px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: 'DM Sans', sans-serif; }
+        .cp-support-btn { border: none; border-radius: 12px; padding: 10px 16px; font-weight: 700; font-size: 13px; cursor: pointer; font-family: 'DM Sans', sans-serif; }
       `}</style>
 
       <div className="cp-wrap">
@@ -138,9 +176,7 @@ export default function ComplaintPage() {
             <div className="cp-404-sub">
               ID <strong style={{ color: '#FF6B00', fontFamily: 'monospace' }}>{id}</strong> se koi complaint nahi mili.
             </div>
-            <button className="cp-home-btn" onClick={() => window.location.href = '/'}>
-              🏠 Home Pe Jao
-            </button>
+            <button className="cp-home-btn" onClick={() => window.location.href = '/'}>🏠 Home Pe Jao</button>
           </div>
         )}
 
@@ -173,22 +209,38 @@ export default function ComplaintPage() {
                   </div>
                 ))}
               </div>
-              <div
-                className="cp-current-status"
-                style={{ background: severityBg(complaint.severity), color: statusColor(complaint.status), border: `1px solid ${statusColor(complaint.status)}30` }}
-              >
+              <div className="cp-current-status" style={{ background: severityBg(complaint.severity), color: statusColor(complaint.status), border: `1px solid ${statusColor(complaint.status)}30` }}>
                 Current Status: {complaint.status}
               </div>
             </div>
 
-            {/* Support Count */}
+            {/* Community Support */}
             <div className="cp-label">Community Support</div>
             <div className="cp-support-card">
               <div>
                 <div className="cp-support-count">{complaint.supportCount || 0}</div>
                 <div className="cp-support-label">citizens ne support kiya</div>
               </div>
-              <div style={{ fontSize: 36 }}>🤝</div>
+              {!currentUser && (
+                <div style={{ fontSize: 12, color: '#555', textAlign: 'right' }}>
+                  App se login karo<br />support karne ke liye
+                </div>
+              )}
+              {currentUser && alreadySupported && (
+                <button className="cp-support-btn" style={{ background: '#0D2E1A', color: '#34C759', border: '1px solid #34C75930' }} disabled>
+                  ✅ Supported
+                </button>
+              )}
+              {currentUser && canSupport && !alreadySupported && (
+                <button className="cp-support-btn" style={{ background: '#FF6B00', color: '#fff' }} onClick={handleSupport} disabled={supporting}>
+                  {supporting ? '...' : '🤝 Support Karo'}
+                </button>
+              )}
+              {currentUser && !canSupport && !alreadySupported && complaint.userId !== currentUser.id && (
+                <div style={{ fontSize: 11, color: '#3A3A3A', textAlign: 'right', maxWidth: 120 }}>
+                  Same area mein same issue report karo tab support kar sakte ho
+                </div>
+              )}
             </div>
 
             {/* Before / After */}
@@ -241,9 +293,7 @@ export default function ComplaintPage() {
                 <div>
                   <div className="cp-loc-area">{complaint.wardName}, Mumbai</div>
                   <div className="cp-loc-ward">BMC Ward {complaint.ward}</div>
-                  {complaint.addressDetail && (
-                    <div className="cp-address">{complaint.addressDetail}</div>
-                  )}
+                  {complaint.addressDetail && <div className="cp-address">{complaint.addressDetail}</div>}
                 </div>
               </div>
             </div>
@@ -258,23 +308,19 @@ export default function ComplaintPage() {
               </div>
             </div>
 
-            {/* Reported By */}
+            {/* Reported By — Anonymous */}
             <div className="cp-label">Reported By</div>
             <div className="cp-reporter">
-              <div className="cp-reporter-name">
-                👤 {complaint.userFirstName} {complaint.userLastName ? complaint.userLastName[0] + '.' : ''}
-              </div>
-              <div className="cp-reporter-meta">Mumbai Citizen • Reported via NagrikAI</div>
+              <div className="cp-reporter-name">👤 Anonymous Citizen</div>
+              <div className="cp-reporter-meta">Mumbai Resident • Reported via NagrikAI</div>
             </div>
 
-            {/* GPS Map */}
             {complaint.lat && complaint.lng && (
               <button className="cp-map-btn" onClick={() => window.open(`https://www.google.com/maps?q=${complaint.lat},${complaint.lng}`, '_blank')}>
                 🗺️ Google Maps pe Dekho
               </button>
             )}
 
-            {/* Share */}
             <button
               className={`cp-share-btn ${linkCopied ? 'copied' : ''}`}
               onClick={() => { navigator.clipboard.writeText(window.location.href); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2500) }}
