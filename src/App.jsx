@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { collection, addDoc, query, where, getDocs } from 'firebase/firestore'
-import { db } from './firebase'
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
+import { db, storage } from './firebase'
 import MapView from './components/MapView'
 import Step3 from './components/Step3'
 import Signup from './components/Signup'
@@ -129,19 +130,17 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
   const cid = generateComplaintId()
   setComplaintId(cid)
 
-  // Convert preview to base64
-  let beforePhotoBase64 = null
-  if (preview) {
-    const response = await fetch(preview)
-    const blob = await response.blob()
-    beforePhotoBase64 = await new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result)
-      reader.readAsDataURL(blob)
-    })
-  }
+  let beforePhotoUrl = null
 
   try {
+    if (preview) {
+      const response = await fetch(preview)
+      const blob = await response.blob()
+      const photoRef = ref(storage, `complaints/${cid}/before.jpg`)
+      await uploadBytes(photoRef, blob)
+      beforePhotoUrl = await getDownloadURL(photoRef)
+    }
+
     await addDoc(collection(db, 'complaints'), {
       complaintId: cid,
       userId: user.id,
@@ -159,7 +158,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
       lng: location.lng,
       createdAt: new Date().toISOString(),
       status: 'Pending',
-      beforePhoto: beforePhotoBase64,  // ← photo saved!
+      beforePhoto: beforePhotoUrl,
       afterPhoto: null,
       supportCount: 0,
       supporters: [],
