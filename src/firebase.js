@@ -1,6 +1,8 @@
 import { initializeApp } from 'firebase/app'
 import { getFirestore } from 'firebase/firestore'
-import { getStorage } from 'firebase/storage'
+
+// Firebase Storage import removed — photos are now stored as base64 in Firestore directly.
+// This avoids Storage CORS/permissions issues and the silent upload failures.
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -13,4 +15,9 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig)
 export const db = getFirestore(app)
-export const storage = getStorage(app)
+
+// NOTE: If you later want to re-enable Firebase Storage (e.g. for after-photos
+// uploaded by BMC officers), just add back:
+//   import { getStorage } from 'firebase/storage'
+//   export const storage = getStorage(app)
+// and update BmcDashboard.jsx to import it from here.

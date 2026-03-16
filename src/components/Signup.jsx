@@ -22,10 +22,12 @@ export default function Signup({ onComplete }) {
         reportsCount: 0,
         points: 0,
       })
+      // Save full user object including id (docRef.id) to localStorage
       const userData = { ...form, id: docRef.id }
       localStorage.setItem('nagrik_user', JSON.stringify(userData))
       onComplete(userData)
     } catch (e) {
+      console.error('Signup error:', e)
       setError('Error saving data. Try again!')
     }
     setLoading(false)
@@ -56,10 +58,32 @@ export default function Signup({ onComplete }) {
           <span className="sg-flag">🇮🇳</span>
           <div className="sg-title">NagrikAI</div>
           <div className="sg-sub">Mumbai ki awaaz, AI ki taakat</div>
-          <input className="sg-input" placeholder="First Name *" value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} />
-          <input className="sg-input" placeholder="Last Name" value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })} />
-          <input className="sg-input" placeholder="Mobile Number * (10 digits)" value={form.mobile} maxLength={10} onChange={e => setForm({ ...form, mobile: e.target.value.replace(/\D/g, '') })} />
-          <input className="sg-input" placeholder="Email Address *" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+          <input
+            className="sg-input"
+            placeholder="First Name *"
+            value={form.firstName}
+            onChange={e => setForm({ ...form, firstName: e.target.value })}
+          />
+          <input
+            className="sg-input"
+            placeholder="Last Name"
+            value={form.lastName}
+            onChange={e => setForm({ ...form, lastName: e.target.value })}
+          />
+          <input
+            className="sg-input"
+            placeholder="Mobile Number * (10 digits)"
+            value={form.mobile}
+            maxLength={10}
+            onChange={e => setForm({ ...form, mobile: e.target.value.replace(/\D/g, '') })}
+          />
+          <input
+            className="sg-input"
+            placeholder="Email Address *"
+            type="email"
+            value={form.email}
+            onChange={e => setForm({ ...form, email: e.target.value })}
+          />
           {error && <div className="sg-error">{error}</div>}
           <button className="sg-btn" onClick={handleSubmit} disabled={loading}>
             {loading ? 'Saving...' : 'Get Started 🚀'}

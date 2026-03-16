@@ -37,7 +37,11 @@ const getRoast = (issueType, wardName) => {
   return pick.replace(/{ward}/g, wardName.replace(/ /g, ''))
 }
 
-export default function Step3({ result, location, preview, user, complaintId }) {
+// ─── Props ────────────────────────────────────────────────────────────────────
+// photoDataUrl  — base64 data URL passed from App.jsx (replaces fetching preview blob)
+// preview       — object URL for <img> display only (still used for canvas drawImage)
+// ─────────────────────────────────────────────────────────────────────────────
+export default function Step3({ result, location, preview, photoDataUrl, user, complaintId }) {
   const canvasRef = useRef(null)
   const [roast] = useState(() => getRoast(result.issueType, location.ward.name))
   const [storyReady, setStoryReady] = useState(false)
@@ -53,16 +57,8 @@ export default function Step3({ result, location, preview, user, complaintId }) 
   const trackingUrl = `${window.location.origin}/complaint/${complaintId}`
 
   useEffect(() => {
-    if (preview) {
-      fetch(preview)
-        .then(r => r.blob())
-        .then(blob => {
-          const reader = new FileReader()
-          reader.onload = () => setPhotoBase64(reader.result)
-          reader.readAsDataURL(blob)
-        })
-        .catch(e => console.error('Photo base64 convert error:', e))
-    }
+    // Use the base64 already computed in App.jsx — no need to re-fetch the blob
+    if (photoDataUrl) setPhotoBase64(photoDataUrl)
     if (preview) drawStory()
   }, [])
 
@@ -214,47 +210,47 @@ NagrikAI Platform`
   }
 
   const sendEmail = async () => {
-  setEmailSending(true)
-  setEmailError('')
-  try {
-    await emailjs.send(
-      import.meta.env.VITE_EMAILJS_SERVICE_ID,
-      import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
-      {
-        to_email: location.ward.wardOfficeEmail,
-        complaint_id: complaintId,
-        issue_type: result.issueType,
-        severity: result.severity,
-        ward: location.ward.ward,
-        ward_name: location.ward.name,
-        address_detail: result.addressDetail || "Not specified",
-        gps: `${location.lat}, ${location.lng}`,
-        description: result.description,
-        user_name: `${user.firstName} ${user.lastName}`,
-        user_mobile: user.mobile,
-        user_email: user.email,
-        tracking_url: trackingUrl
-      },
-      import.meta.env.VITE_EMAILJS_PUBLIC_KEY
-    )
+    setEmailSending(true)
+    setEmailError('')
+    try {
+      await emailjs.send(
+        import.meta.env.VITE_EMAILJS_SERVICE_ID,
+        import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
+        {
+          to_email: location.ward.wardOfficeEmail,
+          complaint_id: complaintId,
+          issue_type: result.issueType,
+          severity: result.severity,
+          ward: location.ward.ward,
+          ward_name: location.ward.name,
+          address_detail: result.addressDetail || 'Not specified',
+          gps: `${location.lat}, ${location.lng}`,
+          description: result.description,
+          user_name: `${user.firstName} ${user.lastName}`,
+          user_mobile: user.mobile,
+          user_email: user.email,
+          tracking_url: trackingUrl,
+        },
+        import.meta.env.VITE_EMAILJS_PUBLIC_KEY
+      )
 
-    const q = query(collection(db, 'complaints'), where('complaintId', '==', complaintId))
-    const snap = await getDocs(q)
-    if (!snap.empty) {
-      await updateDoc(doc(db, 'complaints', snap.docs[0].id), {
-        status: 'Reported',
-        emailSentAt: new Date().toISOString()
-      })
+      const q = query(collection(db, 'complaints'), where('complaintId', '==', complaintId))
+      const snap = await getDocs(q)
+      if (!snap.empty) {
+        await updateDoc(doc(db, 'complaints', snap.docs[0].id), {
+          status: 'Reported',
+          emailSentAt: new Date().toISOString()
+        })
+      }
+
+      setEmailSent(true)
+      setShowEmailPreview(false)
+    } catch (err) {
+      console.error('EmailJS error:', err)
+      setEmailError('Email send nahi hua — dobara try karo')
     }
-
-    setEmailSent(true)
-    setShowEmailPreview(false)
-  } catch (err) {
-    console.error('EmailJS error:', err)
-    setEmailError('Email send nahi hua — dobara try karo')
+    setEmailSending(false)
   }
-  setEmailSending(false)
-}
 
   return (
     <>
@@ -319,7 +315,10 @@ NagrikAI Platform`
             <div className="s3-id-value">{complaintId}</div>
             <div className="s3-id-url">🔗 {trackingUrl}</div>
           </div>
-          <button className={`s3-copy-btn ${copied ? 'done' : ''}`} onClick={() => { navigator.clipboard.writeText(trackingUrl); setCopied(true); setTimeout(() => setCopied(false), 2500) }}>
+          <button
+            className={`s3-copy-btn ${copied ? 'done' : ''}`}
+            onClick={() => { navigator.clipboard.writeText(trackingUrl); setCopied(true); setTimeout(() => setCopied(false), 2500) }}
+          >
             {copied ? '✅ Copied' : '📋 Copy Link'}
           </button>
         </div>
@@ -383,17 +382,26 @@ NagrikAI Platform`
               Jayegi → <span className="s3-modal-to">{location.ward.wardOfficeEmail}</span>
               <br /><span style={{ fontSize: 11, color: '#3A3A3A' }}>✅ Directly background mein send hogi</span>
             </div>
-            {preview && (
+
+            {/* Show photo from base64 — works even without Firebase Storage */}
+            {(photoBase64 || preview) && (
               <>
                 <div style={{ fontSize: 10, color: '#555', letterSpacing: 1, textTransform: 'uppercase', fontWeight: 700, marginBottom: 8 }}>📷 Attached Photo</div>
-                <img src={preview} className="s3-modal-photo" alt="Issue Photo" />
+                <img src={photoBase64 || preview} className="s3-modal-photo" alt="Issue Photo" />
               </>
             )}
+
             <div className="s3-email-edit-label">
               ✏️ Email Body
               <span className="s3-edit-badge">EDITABLE</span>
             </div>
-            <textarea className="s3-email-textarea" value={editableEmailBody} onChange={e => setEditableEmailBody(e.target.value)} disabled={emailSending} spellCheck={false} />
+            <textarea
+              className="s3-email-textarea"
+              value={editableEmailBody}
+              onChange={e => setEditableEmailBody(e.target.value)}
+              disabled={emailSending}
+              spellCheck={false}
+            />
             <div className="s3-photo-note">📎 Photo automatically email mein inline attach hogi.</div>
             <div className="s3-modal-actions">
               <button className="s3-btn s3-btn-ghost" onClick={() => setShowEmailPreview(false)} disabled={emailSending}>Cancel</button>

@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { collection, addDoc, query, where, getDocs, doc, updateDoc, arrayUnion } from 'firebase/firestore'
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
-import { db, storage } from './firebase'
+import { db } from './firebase'
 import MapView from './components/MapView'
 import Step3 from './components/Step3'
 import Signup from './components/Signup'
@@ -32,17 +31,16 @@ export default function App() {
   const [existingComplaint, setExistingComplaint] = useState(null)
   const [checkingDuplicate, setCheckingDuplicate] = useState(false)
   const [supported, setSupported]                 = useState(false)
-  const [photoFile, setPhotoFile]                = useState(null)
+  const [photoBase64, setPhotoBase64]             = useState(null)  // base64 data URL — replaces Firebase Storage
+
   useEffect(() => {
     const saved = localStorage.getItem('nagrik_user')
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
-        // Validate that user has required id field
         if (parsed && parsed.id) {
           setUser(parsed)
         } else {
-          // Invalid user data - clear localStorage and show signup
           localStorage.removeItem('nagrik_user')
           console.warn('Invalid user data in localStorage - cleared')
         }
@@ -65,11 +63,11 @@ export default function App() {
     )
 
     const onRestart = () => {
-  setStep(1); setResult(null); setPreview(null)
-  setPhotoFile(null)           // ← ADD THIS
-  setAddressInput(''); setComplaintId(null); setPhotoError('')
-  setExistingComplaint(null); setCheckingDuplicate(false); setSupported(false)
-}
+      setStep(1); setResult(null); setPreview(null)
+      setPhotoBase64(null)
+      setAddressInput(''); setComplaintId(null); setPhotoError('')
+      setExistingComplaint(null); setCheckingDuplicate(false); setSupported(false)
+    }
     window.addEventListener('restartApp', onRestart)
     return () => window.removeEventListener('restartApp', onRestart)
   }, [])
@@ -126,11 +124,9 @@ export default function App() {
   }
 
   const handlePhoto = async (e) => {
-  const file = e.target.files[0]
-  if (!file) return
-  setPhotoFile(file)           // ← ADD THIS LINE
-  setPreview(URL.createObjectURL(file))
-  // ... rest stays the same
+    const file = e.target.files[0]
+    if (!file) return
+    setPreview(URL.createObjectURL(file))
     setPhotoError('')
     setLoading(true)
 
@@ -138,10 +134,14 @@ export default function App() {
     reader.readAsDataURL(file)
     reader.onload = async () => {
       try {
-        const base64 = reader.result.split(',')[1]
-        const model  = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
-        const res    = await model.generateContent([
-          { inlineData: { mimeType: 'image/jpeg', data: base64 } },
+        const dataUrl = reader.result                  // full data URL e.g. "data:image/jpeg;base64,..."
+        const base64  = dataUrl.split(',')[1]          // raw base64 for Gemini
+
+        setPhotoBase64(dataUrl)                        // ← store full data URL for Firestore + Step3
+
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+        const res   = await model.generateContent([
+          { inlineData: { mimeType: file.type || 'image/jpeg', data: base64 } },
           `You are a strict Mumbai civic issue detector for BMC.
 Analyze this image carefully.
 
@@ -163,6 +163,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         if (clean === 'NOT_CIVIC_ISSUE' || !clean.startsWith('{')) {
           setLoading(false)
           setPreview(null)
+          setPhotoBase64(null)
           setPhotoError('Yeh civic issue nahi lagta. Pothole, garbage, broken streetlight ya waterlogging ki clear photo lo.')
           return
         }
@@ -176,62 +177,50 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         console.error(err)
         setLoading(false)
         setPreview(null)
+        setPhotoBase64(null)
         setPhotoError('Image analyze nahi ho saki. Dobara try karo.')
       }
     }
   }
 
- const handleProceed = async () => {
-  setSaving(true)
-  const cid = generateComplaintId()
-  setComplaintId(cid)
+  const handleProceed = async () => {
+    setSaving(true)
+    const cid = generateComplaintId()
+    setComplaintId(cid)
 
-  let beforePhotoURL = null
-
-  // Upload photo to Firebase Storage
-  if (photoFile) {
     try {
-      const ext = photoFile.name.split('.').pop() || 'jpg'
-      const storageRef = ref(storage, `complaints/${cid}/before.${ext}`)
-      await uploadBytes(storageRef, photoFile)
-      beforePhotoURL = await getDownloadURL(storageRef)
+      await addDoc(collection(db, 'complaints'), {
+        complaintId: cid,
+        userId: user.id,
+        userFirstName: user.firstName,
+        userLastName: user.lastName,
+        userMobile: user.mobile,
+        userEmail: user.email,
+        issueType: result.issueType,
+        severity: result.severity,
+        description: result.description,
+        addressDetail: addressInput.trim(),
+        ward: location.ward.ward,
+        wardName: location.ward.name,
+        lat: location.lat,
+        lng: location.lng,
+        createdAt: new Date().toISOString(),
+        status: 'Pending',
+        beforePhoto: photoBase64 || null,   // ← base64 data URL stored directly in Firestore
+        afterPhoto: null,
+        supportCount: 0,
+        supporters: [],
+      })
+      loadComplaints(user.id)               // ← Fix 2: auto-refresh complaints after saving
     } catch (e) {
-      console.error('Storage upload error:', e)
-      // Non-fatal: continue saving complaint without photo
+      console.error('Firestore save error:', e)
     }
+
+    setResult(r => ({ ...r, addressDetail: addressInput.trim() }))
+    setSaving(false)
+    setStep(3)
   }
 
-  try {
-    await addDoc(collection(db, 'complaints'), {
-      complaintId: cid,
-      userId: user.id,
-      userFirstName: user.firstName,
-      userLastName: user.lastName,
-      userMobile: user.mobile,
-      userEmail: user.email,
-      issueType: result.issueType,
-      severity: result.severity,
-      description: result.description,
-      addressDetail: addressInput.trim(),
-      ward: location.ward.ward,
-      wardName: location.ward.name,
-      lat: location.lat,
-      lng: location.lng,
-      createdAt: new Date().toISOString(),
-      status: 'Pending',
-      beforePhoto: beforePhotoURL,   // ← Now a real URL or null if upload failed
-      afterPhoto: null,
-      supportCount: 0,
-      supporters: [],
-    })
-  } catch (e) {
-    console.error('Firestore save error:', e)
-  }
-
-  setResult(r => ({ ...r, addressDetail: addressInput.trim() }))
-  setSaving(false)
-  setStep(3)
-}
   if (!user) return <Signup onComplete={(u) => setUser(u)} />
 
   return (
@@ -487,7 +476,14 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         )}
 
         {step === 3 && result && location && complaintId && (
-          <Step3 result={result} location={location} preview={preview} user={user} complaintId={complaintId} />
+          <Step3
+            result={result}
+            location={location}
+            preview={preview}
+            photoDataUrl={photoBase64}
+            user={user}
+            complaintId={complaintId}
+          />
         )}
       </div>
 
@@ -505,7 +501,6 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
             </div>
 
             <div className="sec-label">Meri Complaints</div>
-            <div className="profile-meta">Debug: {complaints.length} complaint{complaints.length !== 1 ? 's' : ''} found for user ID {user.id}</div>
 
             {loadingComplaints && (
               <div style={{ textAlign: 'center', padding: '32px 0', color: '#333' }}>
