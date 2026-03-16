@@ -60,7 +60,6 @@ export default function App() {
   const [supported, setSupported]                 = useState(false)
   const [photoBase64, setPhotoBase64]             = useState(null)
 
-  // ── Computed directly from complaints array — always fresh ──
   const resolvedCount = complaints.filter(c => c.status === 'Resolved').length
   const trusted       = resolvedCount >= TRUSTED_THRESHOLD
   const remaining     = Math.max(0, TRUSTED_THRESHOLD - resolvedCount)
@@ -100,6 +99,11 @@ export default function App() {
   useEffect(() => {
     if (step === 2 && result && location) checkDuplicate()
   }, [step])
+
+  // ── Load complaints as soon as user is set — badge works immediately ──
+  useEffect(() => {
+    if (user) loadComplaints(user.id)
+  }, [user])
 
   const loadComplaints = async (uid) => {
     setLoadingComplaints(true)
@@ -296,7 +300,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         .profile-count { font-size: 12px; color: #FF6B00; margin-top: 4px; font-weight: 600; }
         .trusted-badge-block { margin-top: 8px; background: #1A1A1A; border: 1px solid #252525; border-radius: 12px; padding: 10px 14px; }
         .trusted-badge-block.earned { background: #34C75912; border-color: #34C75935; }
-        .trusted-badge-title { font-size: 13px; font-weight: 700; color: #888; display: flex; align-items: center; gap: 6px; }
+        .trusted-badge-title { font-size: 13px; font-weight: 700; color: #555; display: flex; align-items: center; gap: 6px; }
         .trusted-badge-title.earned { color: #34C759; }
         .trusted-badge-sub { font-size: 11px; color: #34C75990; margin-top: 3px; }
         .trusted-badge-progress { margin-top: 8px; }
@@ -483,7 +487,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
                 <div className="profile-meta">{user.mobile} • {user.email}</div>
                 <div className="profile-count">{t('complaints', complaints.length)}</div>
 
-                {/* ── Trusted Nagrik Badge — shown after complaints load ── */}
+                {/* Badge — wait for complaints to load then show */}
                 {!loadingComplaints && (
                   <div className={`trusted-badge-block ${trusted ? 'earned' : ''}`}>
                     {trusted ? (
