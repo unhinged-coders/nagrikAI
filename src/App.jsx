@@ -14,6 +14,30 @@ const severityColor = (s) => s === 'High' ? '#FF3B30' : s === 'Medium' ? '#FF950
 const severityBg   = (s) => s === 'High' ? '#FF3B3018' : s === 'Medium' ? '#FF950018' : '#34C75918'
 const issueIcon    = (t) => ({ Pothole: '🕳️', Garbage: '🗑️', 'Broken Streetlight': '💡', Waterlogging: '🌊' }[t] || '⚠️')
 
+// ── Compress image before storing ────────────────────────────────────────────
+// Max 800px, JPEG quality 0.6 → ~60-80KB instead of 300-500KB
+// This fixes mobile rendering and keeps Firestore docs well under 1MB limit
+const compressImage = (file) =>
+  new Promise((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      const MAX = 800
+      let { width, height } = img
+      if (width > MAX || height > MAX) {
+        if (width > height) { height = Math.round(height * MAX / width); width = MAX }
+        else                { width  = Math.round(width  * MAX / height); height = MAX }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width; canvas.height = height
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+      URL.revokeObjectURL(url)
+      resolve(canvas.toDataURL('image/jpeg', 0.6))
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null) }
+    img.src = url
+  })
+
 export default function App() {
   const [user, setUser]                           = useState(null)
   const [result, setResult]                       = useState(null)
@@ -31,7 +55,7 @@ export default function App() {
   const [existingComplaint, setExistingComplaint] = useState(null)
   const [checkingDuplicate, setCheckingDuplicate] = useState(false)
   const [supported, setSupported]                 = useState(false)
-  const [photoBase64, setPhotoBase64]             = useState(null)  // base64 data URL — replaces Firebase Storage
+  const [photoBase64, setPhotoBase64]             = useState(null)
 
   useEffect(() => {
     const saved = localStorage.getItem('nagrik_user')
@@ -42,10 +66,8 @@ export default function App() {
           setUser(parsed)
         } else {
           localStorage.removeItem('nagrik_user')
-          console.warn('Invalid user data in localStorage - cleared')
         }
       } catch (e) {
-        console.error('Failed to parse localStorage user:', e)
         localStorage.removeItem('nagrik_user')
       }
     }
@@ -130,19 +152,20 @@ export default function App() {
     setPhotoError('')
     setLoading(true)
 
-    const reader = new FileReader()
-    reader.readAsDataURL(file)
-    reader.onload = async () => {
-      try {
-        const dataUrl = reader.result                  // full data URL e.g. "data:image/jpeg;base64,..."
-        const base64  = dataUrl.split(',')[1]          // raw base64 for Gemini
+    try {
+      // Compress first — this is what we store AND send to Gemini
+      const compressed = await compressImage(file)
+      if (!compressed) throw new Error('Compression failed')
 
-        setPhotoBase64(dataUrl)                        // ← store full data URL for Firestore + Step3
+      setPhotoBase64(compressed)
 
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
-        const res   = await model.generateContent([
-          { inlineData: { mimeType: file.type || 'image/jpeg', data: base64 } },
-          `You are a strict Mumbai civic issue detector for BMC.
+      // Extract raw base64 for Gemini (strip the data:image/jpeg;base64, prefix)
+      const base64 = compressed.split(',')[1]
+
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+      const res   = await model.generateContent([
+        { inlineData: { mimeType: 'image/jpeg', data: base64 } },
+        `You are a strict Mumbai civic issue detector for BMC.
 Analyze this image carefully.
 
 ONLY accept these valid civic problems visible in public areas/roads:
@@ -155,31 +178,30 @@ If image is NOT a civic issue (selfie, food, animal, indoor photo, nature, rando
 NOT_CIVIC_ISSUE
 
 Be very strict. When in doubt → NOT_CIVIC_ISSUE`
-        ])
+      ])
 
-        const text  = res.response.text().trim()
-        const clean = text.replace(/```json|```/g, '').trim()
+      const text  = res.response.text().trim()
+      const clean = text.replace(/```json|```/g, '').trim()
 
-        if (clean === 'NOT_CIVIC_ISSUE' || !clean.startsWith('{')) {
-          setLoading(false)
-          setPreview(null)
-          setPhotoBase64(null)
-          setPhotoError('Yeh civic issue nahi lagta. Pothole, garbage, broken streetlight ya waterlogging ki clear photo lo.')
-          return
-        }
-
-        const parsed = JSON.parse(clean)
-        setResult(parsed)
-        setLoading(false)
-        setStep(2)
-
-      } catch (err) {
-        console.error(err)
+      if (clean === 'NOT_CIVIC_ISSUE' || !clean.startsWith('{')) {
         setLoading(false)
         setPreview(null)
         setPhotoBase64(null)
-        setPhotoError('Image analyze nahi ho saki. Dobara try karo.')
+        setPhotoError('Yeh civic issue nahi lagta. Pothole, garbage, broken streetlight ya waterlogging ki clear photo lo.')
+        return
       }
+
+      const parsed = JSON.parse(clean)
+      setResult(parsed)
+      setLoading(false)
+      setStep(2)
+
+    } catch (err) {
+      console.error(err)
+      setLoading(false)
+      setPreview(null)
+      setPhotoBase64(null)
+      setPhotoError('Image analyze nahi ho saki. Dobara try karo.')
     }
   }
 
@@ -190,28 +212,28 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
 
     try {
       await addDoc(collection(db, 'complaints'), {
-        complaintId: cid,
-        userId: user.id,
+        complaintId:   cid,
+        userId:        user.id,
         userFirstName: user.firstName,
-        userLastName: user.lastName,
-        userMobile: user.mobile,
-        userEmail: user.email,
-        issueType: result.issueType,
-        severity: result.severity,
-        description: result.description,
+        userLastName:  user.lastName,
+        userMobile:    user.mobile,
+        userEmail:     user.email,
+        issueType:     result.issueType,
+        severity:      result.severity,
+        description:   result.description,
         addressDetail: addressInput.trim(),
-        ward: location.ward.ward,
-        wardName: location.ward.name,
-        lat: location.lat,
-        lng: location.lng,
-        createdAt: new Date().toISOString(),
-        status: 'Pending',
-        beforePhoto: photoBase64 || null,   // ← base64 data URL stored directly in Firestore
-        afterPhoto: null,
-        supportCount: 0,
-        supporters: [],
+        ward:          location.ward.ward,
+        wardName:      location.ward.name,
+        lat:           location.lat,
+        lng:           location.lng,
+        createdAt:     new Date().toISOString(),
+        status:        'Pending',
+        beforePhoto:   photoBase64 || null,
+        afterPhoto:    null,
+        supportCount:  0,
+        supporters:    [],
       })
-      loadComplaints(user.id)               // ← Fix 2: auto-refresh complaints after saving
+      loadComplaints(user.id)
     } catch (e) {
       console.error('Firestore save error:', e)
     }
@@ -435,13 +457,10 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
             ) : supported && existingComplaint ? (
               <div style={{ background: '#34C75918', border: '1px solid #34C75935', borderRadius: 16, padding: 16 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#34C759', lineHeight: 1.6 }}>
-                  ✅ You supported complaint {existingComplaint.complaintId} — Track it at /complaint/{existingComplaint.complaintId}
+                  ✅ You supported complaint {existingComplaint.complaintId}
                 </div>
-                <button
-                  className="action-btn"
-                  style={{ marginTop: 12, background: '#34C759' }}
-                  onClick={() => window.open(`${window.location.origin}/complaint/${existingComplaint.complaintId}`, '_blank')}
-                >
+                <button className="action-btn" style={{ marginTop: 12, background: '#34C759' }}
+                  onClick={() => window.open(`${window.location.origin}/complaint/${existingComplaint.complaintId}`, '_blank')}>
                   🔗 Open Tracking Link
                 </button>
               </div>
@@ -457,19 +476,16 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
                   Complaint ID: {existingComplaint.complaintId}
                 </div>
                 <button className="action-btn" onClick={supportExisting} disabled={saving}>
-                  {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} /> Saving...</> : '🤝 Support This Complaint'}
+                  {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} />Saving...</> : '🤝 Support This Complaint'}
                 </button>
-                <button
-                  className="action-btn"
-                  style={{ marginTop: 10, background: 'transparent', color: '#FF9500', border: '1px solid #FF950035' }}
-                  onClick={() => setExistingComplaint(null)}
-                >
+                <button className="action-btn" style={{ marginTop: 10, background: 'transparent', color: '#FF9500', border: '1px solid #FF950035' }}
+                  onClick={() => setExistingComplaint(null)}>
                   Different location? Submit anyway
                 </button>
               </div>
             ) : (
               <button className="action-btn" onClick={handleProceed} disabled={saving}>
-                {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} /> Saving...</> : '📱 Instagram Story Banao →'}
+                {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} />Saving...</> : '📱 Instagram Story Banao →'}
               </button>
             )}
           </div>
