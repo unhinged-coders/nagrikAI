@@ -7,6 +7,8 @@ import Step3 from './components/Step3'
 import Signup from './components/Signup'
 import { detectWard, generateComplaintId } from './data/wardData'
 import 'leaflet/dist/leaflet.css'
+import { useLanguage } from './hooks/useLanguage'
+import LangToggle from './components/LangToggle'
 
 const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY)
 
@@ -14,9 +16,6 @@ const severityColor = (s) => s === 'High' ? '#FF3B30' : s === 'Medium' ? '#FF950
 const severityBg   = (s) => s === 'High' ? '#FF3B3018' : s === 'Medium' ? '#FF950018' : '#34C75918'
 const issueIcon    = (t) => ({ Pothole: '🕳️', Garbage: '🗑️', 'Broken Streetlight': '💡', Waterlogging: '🌊' }[t] || '⚠️')
 
-// ── Compress image before storing ────────────────────────────────────────────
-// Max 800px, JPEG quality 0.6 → ~60-80KB instead of 300-500KB
-// This fixes mobile rendering and keeps Firestore docs well under 1MB limit
 const compressImage = (file) =>
   new Promise((resolve) => {
     const img = new Image()
@@ -39,6 +38,8 @@ const compressImage = (file) =>
   })
 
 export default function App() {
+  const { t } = useLanguage()   // ← ADDED
+
   const [user, setUser]                           = useState(null)
   const [result, setResult]                       = useState(null)
   const [location, setLocation]                   = useState(null)
@@ -153,13 +154,11 @@ export default function App() {
     setLoading(true)
 
     try {
-      // Compress first — this is what we store AND send to Gemini
       const compressed = await compressImage(file)
       if (!compressed) throw new Error('Compression failed')
 
       setPhotoBase64(compressed)
 
-      // Extract raw base64 for Gemini (strip the data:image/jpeg;base64, prefix)
       const base64 = compressed.split(',')[1]
 
       const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
@@ -187,7 +186,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         setLoading(false)
         setPreview(null)
         setPhotoBase64(null)
-        setPhotoError('Yeh civic issue nahi lagta. Pothole, garbage, broken streetlight ya waterlogging ki clear photo lo.')
+        setPhotoError(t('photoErrorMsg'))
         return
       }
 
@@ -201,7 +200,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
       setLoading(false)
       setPreview(null)
       setPhotoBase64(null)
-      setPhotoError('Image analyze nahi ho saki. Dobara try karo.')
+      setPhotoError(t('photoErrorMsg'))
     }
   }
 
@@ -353,6 +352,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
               <div className={`sd ${step >= 2 ? (step > 2 ? 'done' : 'active') : ''}`} />
               <div className={`sd ${step >= 3 ? 'active' : ''}`} />
             </div>
+            <LangToggle />                          {/* ← ADDED */}
             <div className="user-chip" onClick={openProfile}>
               <div className="user-av">{user.firstName[0]}</div>
               <div className="user-nm">{user.firstName}</div>
@@ -360,24 +360,24 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
           </div>
         </div>
 
-        {step === 1 && <div className="welcome">👋 Jai hind, {user.firstName}! Koi issue dikhe toh report karo.</div>}
+        {step === 1 && <div className="welcome">{t('welcome', user.firstName)}</div>}
 
         <div className="loc-bar">
           <div className={`loc-dot ${!location ? 'detecting' : ''}`} />
           <div className="loc-text">
-            {location ? <><strong>{location.ward.name}</strong>, Mumbai</> : 'Location detect ho rahi hai...'}
+            {location ? <><strong>{location.ward.name}</strong>, Mumbai</> : t('locationDetecting')}
           </div>
-          {location && <div className="ward-pill">Ward {location.ward.ward}</div>}
+          {location && <div className="ward-pill">{t('ward')} {location.ward.ward}</div>}
         </div>
 
         {step === 1 && (
           <div className="upload-wrap">
             <div className="upload-card">
               <span className="upload-icon">📸</span>
-              <div className="upload-title">Issue Report Karo</div>
-              <div className="upload-sub">Pothole, garbage, broken light ya<br />waterlogging ki photo lo</div>
+              <div className="upload-title">{t('reportIssue')}</div>
+              <div className="upload-sub">{t('uploadSub')}</div>
               <label className="cam-label">
-                📷 Camera Kholo
+                {t('openCamera')}
                 <input className="cam-input" type="file" accept="image/*" capture="environment" onChange={handlePhoto} />
               </label>
               {preview && <img src={preview} className="preview-img" alt="Preview" />}
@@ -385,7 +385,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
                 <div style={{ textAlign: 'center', paddingTop: 16 }}>
                   <div className="ai-loading">
                     <div className="spin" />
-                    <span className="ai-txt">AI analyze kar raha hai...</span>
+                    <span className="ai-txt">{t('aiAnalyzing')}</span>
                   </div>
                 </div>
               )}
@@ -401,7 +401,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
 
         {step === 2 && result && location && (
           <div className="result-wrap">
-            <div className="sec-label">AI Detection</div>
+            <div className="sec-label">{t('aiDetection')}</div>
             <div className="issue-card">
               <div className="issue-hdr">
                 <div className="issue-ico">{issueIcon(result.issueType)}</div>
@@ -409,7 +409,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
                   <div className="issue-type">{result.issueType}</div>
                   <div className="issue-desc">{result.description}</div>
                   <div className="sev-tag" style={{ background: severityBg(result.severity), color: severityColor(result.severity) }}>
-                    ● {result.severity} Severity
+                    ● {result.severity} {t('severity')}
                   </div>
                 </div>
               </div>
@@ -418,13 +418,13 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
                 <div className="loc-info-ico">📍</div>
                 <div className="loc-info-det">
                   <div className="loc-area">{location.ward.name}, Mumbai</div>
-                  <div className="loc-ward">BMC Ward {location.ward.ward}</div>
+                  <div className="loc-ward">BMC {t('ward')} {location.ward.ward}</div>
                   <div className="loc-covers">{location.ward.areas.slice(0, 4).join(' · ')}</div>
                 </div>
               </div>
             </div>
 
-            <div className="sec-label">Ward Officer</div>
+            <div className="sec-label">{t('wardOfficer')}</div>
             <div className="officer-bar">
               <div className="officer-av">👮</div>
               <div>
@@ -433,16 +433,16 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
               </div>
             </div>
 
-            <div className="sec-label">Exact Location (Optional)</div>
+            <div className="sec-label">{t('exactLocation')}</div>
             <div className="addr-wrap">
               <div className="addr-box">
                 <div className="addr-lbl">📍 Address Details</div>
-                <textarea className="addr-input" rows={3} placeholder="Jaise: Shivaji Nagar, near petrol pump, Lane 3 ke aage..." value={addressInput} onChange={e => setAddressInput(e.target.value)} />
-                <div className="addr-hint">ℹ️ Exact jagah likhne se BMC ko dhundhna aasaan hoga</div>
+                <textarea className="addr-input" rows={3} placeholder={t('addressPlaceholder')} value={addressInput} onChange={e => setAddressInput(e.target.value)} />
+                <div className="addr-hint">{t('addressHint')}</div>
               </div>
             </div>
 
-            <div className="sec-label">Location on Map</div>
+            <div className="sec-label">{t('locationOnMap')}</div>
             <div className="map-wrap">
               <MapView location={location} result={result} />
             </div>
@@ -451,41 +451,41 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
               <div style={{ textAlign: 'center', paddingTop: 8 }}>
                 <div className="ai-loading" style={{ width: '100%', justifyContent: 'center', borderRadius: 16, padding: 15 }}>
                   <div className="spin" />
-                  <span className="ai-txt">Checking for existing complaints...</span>
+                  <span className="ai-txt">{t('checkingDuplicate')}</span>
                 </div>
               </div>
             ) : supported && existingComplaint ? (
               <div style={{ background: '#34C75918', border: '1px solid #34C75935', borderRadius: 16, padding: 16 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#34C759', lineHeight: 1.6 }}>
-                  ✅ You supported complaint {existingComplaint.complaintId}
+                  {t('supportedMsg', existingComplaint.complaintId)}
                 </div>
                 <button className="action-btn" style={{ marginTop: 12, background: '#34C759' }}
                   onClick={() => window.open(`${window.location.origin}/complaint/${existingComplaint.complaintId}`, '_blank')}>
-                  🔗 Open Tracking Link
+                  {t('openTrackingLink')}
                 </button>
               </div>
             ) : existingComplaint && !supported ? (
               <div style={{ background: '#FF950018', border: '1px solid #FF950035', borderRadius: 16, padding: 16 }}>
                 <div style={{ fontSize: 16, fontWeight: 800, color: '#FF9500', marginBottom: 6 }}>
-                  ⚠️ Same issue already reported in Ward {location.ward.ward}!
+                  {t('duplicateTitle', location.ward.ward)}
                 </div>
                 <div style={{ fontSize: 13, color: '#bbb', marginBottom: 10 }}>
-                  Support this complaint instead of creating a duplicate
+                  {t('duplicateSub')}
                 </div>
                 <div style={{ fontSize: 12, color: '#FF9500', fontFamily: 'monospace', marginBottom: 14 }}>
-                  Complaint ID: {existingComplaint.complaintId}
+                  {t('complaintId')}: {existingComplaint.complaintId}
                 </div>
                 <button className="action-btn" onClick={supportExisting} disabled={saving}>
-                  {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} />Saving...</> : '🤝 Support This Complaint'}
+                  {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} />{t('saving')}</> : t('supportBtn')}
                 </button>
                 <button className="action-btn" style={{ marginTop: 10, background: 'transparent', color: '#FF9500', border: '1px solid #FF950035' }}
                   onClick={() => setExistingComplaint(null)}>
-                  Different location? Submit anyway
+                  {t('differentLocation')}
                 </button>
               </div>
             ) : (
               <button className="action-btn" onClick={handleProceed} disabled={saving}>
-                {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} />Saving...</> : '📱 Instagram Story Banao →'}
+                {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} />{t('saving')}</> : t('submitBtn')}
               </button>
             )}
           </div>
@@ -511,12 +511,12 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
               <div>
                 <div className="profile-name">{user.firstName} {user.lastName}</div>
                 <div className="profile-meta">{user.mobile} • {user.email}</div>
-                <div className="profile-count">{complaints.length} complaint{complaints.length !== 1 ? 's' : ''} reported</div>
+                <div className="profile-count">{t('complaints', complaints.length)}</div>
               </div>
               <button className="profile-close" onClick={() => setShowProfile(false)}>✕</button>
             </div>
 
-            <div className="sec-label">Meri Complaints</div>
+            <div className="sec-label">{t('myComplaints')}</div>
 
             {loadingComplaints && (
               <div style={{ textAlign: 'center', padding: '32px 0', color: '#333' }}>
@@ -528,8 +528,8 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
             {!loadingComplaints && complaints.length === 0 && (
               <div className="empty-state">
                 <div style={{ fontSize: 38, marginBottom: 12 }}>📋</div>
-                <div style={{ fontSize: 14 }}>Abhi koi complaint nahi</div>
-                <div style={{ fontSize: 12, marginTop: 6, color: '#2A2A2A' }}>Pehla issue report karo!</div>
+                <div style={{ fontSize: 14 }}>{t('noComplaints')}</div>
+                <div style={{ fontSize: 12, marginTop: 6, color: '#2A2A2A' }}>{t('noComplaintsSub')}</div>
               </div>
             )}
 
@@ -544,18 +544,18 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
                 {c.addressDetail && <div className="c-address">📍 {c.addressDetail}</div>}
                 <div className="c-desc">{c.description}</div>
                 <div className="c-meta">
-                  <span>🏙 Ward {c.ward} — {c.wardName}</span>
+                  <span>🏙 {t('ward')} {c.ward} — {c.wardName}</span>
                   <span>🕐 {new Date(c.createdAt).toLocaleDateString('en-IN')}</span>
                   <span className="c-status">{c.status}</span>
                 </div>
                 <div className="c-track" onClick={() => window.open(`${window.location.origin}/complaint/${c.complaintId}`, '_blank')}>
-                  🔗 Track: /complaint/{c.complaintId}
+                  🔗 {t('track')}: /complaint/{c.complaintId}
                 </div>
               </div>
             ))}
 
             <button className="logout-btn" onClick={() => { localStorage.removeItem('nagrik_user'); setUser(null); setShowProfile(false) }}>
-              🚪 Logout
+              {t('logout')}
             </button>
           </div>
         </div>
