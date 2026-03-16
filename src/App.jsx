@@ -36,9 +36,16 @@ export default function App() {
   useEffect(() => {
     const saved = localStorage.getItem('nagrik_user')
     if (saved) {
-      const parsed = JSON.parse(saved)
-      console.log('Loaded user from localStorage:', parsed)
-      setUser(parsed)
+      try {
+        const parsed = JSON.parse(saved)
+        console.log('🔓 App Init - Loaded from localStorage:', parsed)
+        console.log('📌 App Init - User ID:', parsed.id)
+        setUser(parsed)
+      } catch (e) {
+        console.error('❌ App Init - JSON parse error:', e)
+      }
+    } else {
+      console.log('⚠️ App Init - No user data in localStorage')
     }
 
     navigator.geolocation.watchPosition(
@@ -68,13 +75,16 @@ export default function App() {
 
   const loadComplaints = async (uid) => {
     setLoadingComplaints(true)
+    console.log('🔍 loadComplaints - Querying for userId:', uid)
     try {
       const q = query(collection(db, 'complaints'), where('userId', '==', uid))
       const snap = await getDocs(q)
+      console.log('📊 loadComplaints - Found', snap.docs.length, 'complaints')
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      list.forEach(c => console.log('   Complaint:', c.complaintId, 'userId:', c.userId))
       list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       setComplaints(list)
-    } catch (e) { console.error('loadComplaints error:', e) }
+    } catch (e) { console.error('❌ loadComplaints error:', e) }
     setLoadingComplaints(false)
   }
 
@@ -171,6 +181,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
   setSaving(true)
   const cid = generateComplaintId()
   setComplaintId(cid)
+  console.log('💾 handleProceed - Saving complaint with userId:', user.id)
 
   try {
     await addDoc(collection(db, 'complaints'), {
