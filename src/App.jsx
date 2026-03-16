@@ -125,36 +125,51 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
   }
 
   const handleProceed = async () => {
-    setSaving(true)
-    const cid = generateComplaintId()
-    setComplaintId(cid)
+  setSaving(true)
+  const cid = generateComplaintId()
+  setComplaintId(cid)
 
-    try {
-      await addDoc(collection(db, 'complaints'), {
-        complaintId:   cid,
-        userId:        user.id,
-        userFirstName: user.firstName,
-        userLastName:  user.lastName,
-        userMobile:    user.mobile,
-        userEmail:     user.email,
-        issueType:     result.issueType,
-        severity:      result.severity,
-        description:   result.description,
-        addressDetail: addressInput.trim(),
-        ward:          location.ward.ward,
-        wardName:      location.ward.name,
-        lat:           location.lat,
-        lng:           location.lng,
-        createdAt:     new Date().toISOString(),
-        status:        'Pending'
-      })
-    } catch (e) { console.error('Firestore save error:', e) }
-
-    setResult(r => ({ ...r, addressDetail: addressInput.trim() }))
-    setSaving(false)
-    setStep(3)
+  // Convert preview to base64
+  let beforePhotoBase64 = null
+  if (preview) {
+    const response = await fetch(preview)
+    const blob = await response.blob()
+    beforePhotoBase64 = await new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.readAsDataURL(blob)
+    })
   }
 
+  try {
+    await addDoc(collection(db, 'complaints'), {
+      complaintId: cid,
+      userId: user.id,
+      userFirstName: user.firstName,
+      userLastName: user.lastName,
+      userMobile: user.mobile,
+      userEmail: user.email,
+      issueType: result.issueType,
+      severity: result.severity,
+      description: result.description,
+      addressDetail: addressInput.trim(),
+      ward: location.ward.ward,
+      wardName: location.ward.name,
+      lat: location.lat,
+      lng: location.lng,
+      createdAt: new Date().toISOString(),
+      status: 'Pending',
+      beforePhoto: beforePhotoBase64,  // ← photo saved!
+      afterPhoto: null,
+      supportCount: 0,
+      supporters: [],
+    })
+  } catch (e) { console.error('Firestore save error:', e) }
+
+  setResult(r => ({ ...r, addressDetail: addressInput.trim() }))
+  setSaving(false)
+  setStep(3)
+}
   if (!user) return <Signup onComplete={(u) => setUser(u)} />
 
   return (
