@@ -16,9 +16,7 @@ const severityColor = (s) => s === 'High' ? '#FF3B30' : s === 'Medium' ? '#FF950
 const severityBg   = (s) => s === 'High' ? '#FF3B3018' : s === 'Medium' ? '#FF950018' : '#34C75918'
 const issueIcon    = (t) => ({ Pothole: '🕳️', Garbage: '🗑️', 'Broken Streetlight': '💡', Waterlogging: '🌊' }[t] || '⚠️')
 
-// ── Trusted Nagrik: 5 resolved complaints = badge ─────────────────────────
 const TRUSTED_THRESHOLD = 5
-const isTrusted = (resolvedCount) => (resolvedCount || 0) >= TRUSTED_THRESHOLD
 
 const compressImage = (file) =>
   new Promise((resolve) => {
@@ -62,9 +60,11 @@ export default function App() {
   const [supported, setSupported]                 = useState(false)
   const [photoBase64, setPhotoBase64]             = useState(null)
 
+  // ── Computed directly from complaints array — always fresh ──
   const resolvedCount = complaints.filter(c => c.status === 'Resolved').length
-const trusted = resolvedCount >= TRUSTED_THRESHOLD
-const remaining = Math.max(0, TRUSTED_THRESHOLD - resolvedCount)
+  const trusted       = resolvedCount >= TRUSTED_THRESHOLD
+  const remaining     = Math.max(0, TRUSTED_THRESHOLD - resolvedCount)
+
   useEffect(() => {
     const saved = localStorage.getItem('nagrik_user')
     if (saved) {
@@ -101,20 +101,6 @@ const remaining = Math.max(0, TRUSTED_THRESHOLD - resolvedCount)
     if (step === 2 && result && location) checkDuplicate()
   }, [step])
 
-  // ── Auto-sync resolvedCount from Firestore complaints ───────────────────
-  // When complaints load, count resolved ones and update user if needed
-  const syncResolvedCount = async (uid, list) => {
-  const resolved = list.filter(c => c.status === 'Resolved').length
-  try {
-    await updateDoc(doc(db, 'users', uid), { resolvedCount: resolved })
-    const saved = localStorage.getItem('nagrik_user')
-    const current = saved ? JSON.parse(saved) : {}
-    const updatedUser = { ...current, resolvedCount: resolved }
-    localStorage.setItem('nagrik_user', JSON.stringify(updatedUser))
-    setUser(updatedUser)
-  } catch (e) { console.error('syncResolvedCount error:', e) }
-}
-
   const loadComplaints = async (uid) => {
     setLoadingComplaints(true)
     try {
@@ -123,7 +109,6 @@ const remaining = Math.max(0, TRUSTED_THRESHOLD - resolvedCount)
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
       list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       setComplaints(list)
-      syncResolvedCount(uid, list)
     } catch (e) { console.error('loadComplaints error:', e) }
     setLoadingComplaints(false)
   }
@@ -309,11 +294,13 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         .profile-name { font-family: 'Syne', sans-serif; font-size: 19px; font-weight: 800; }
         .profile-meta { font-size: 12px; color: #444; margin-top: 3px; }
         .profile-count { font-size: 12px; color: #FF6B00; margin-top: 4px; font-weight: 600; }
-        .trusted-badge-block { margin-top: 8px; background: #34C75912; border: 1px solid #34C75935; border-radius: 12px; padding: 10px 14px; }
-        .trusted-badge-title { font-size: 13px; font-weight: 700; color: #34C759; display: flex; align-items: center; gap: 6px; }
+        .trusted-badge-block { margin-top: 8px; background: #1A1A1A; border: 1px solid #252525; border-radius: 12px; padding: 10px 14px; }
+        .trusted-badge-block.earned { background: #34C75912; border-color: #34C75935; }
+        .trusted-badge-title { font-size: 13px; font-weight: 700; color: #888; display: flex; align-items: center; gap: 6px; }
+        .trusted-badge-title.earned { color: #34C759; }
         .trusted-badge-sub { font-size: 11px; color: #34C75990; margin-top: 3px; }
         .trusted-badge-progress { margin-top: 8px; }
-        .trusted-badge-bar { height: 4px; border-radius: 2px; background: #1E1E1E; overflow: hidden; }
+        .trusted-badge-bar { height: 4px; border-radius: 2px; background: #2A2A2A; overflow: hidden; }
         .trusted-badge-fill { height: 100%; border-radius: 2px; background: #34C759; transition: width 0.4s; }
         .trusted-badge-hint { font-size: 10px; color: #444; margin-top: 4px; }
         .profile-close { margin-left: auto; background: #1A1A1A; border: none; color: #666; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
@@ -344,7 +331,6 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
               <div className={`sd ${step >= 3 ? 'active' : ''}`} />
             </div>
             <LangToggle />
-            {/* User chip — shows Trusted badge if earned */}
             <div className={`user-chip ${trusted ? 'trusted-chip' : ''}`} onClick={openProfile}>
               <div className="user-av">{user.firstName[0]}</div>
               <div className="user-nm">{user.firstName}</div>
@@ -497,27 +483,29 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
                 <div className="profile-meta">{user.mobile} • {user.email}</div>
                 <div className="profile-count">{t('complaints', complaints.length)}</div>
 
-                {/* ── Trusted Nagrik Badge Block ── */}
-                <div className="trusted-badge-block">
-                  {trusted ? (
-                    <>
-                      <div className="trusted-badge-title">✅ Trusted Nagrik</div>
-                      <div className="trusted-badge-sub">{resolvedCount} complaints resolved by BMC</div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="trusted-badge-title" style={{ color: '#888' }}>⬜ Trusted Nagrik</div>
-                      <div className="trusted-badge-progress">
-                        <div className="trusted-badge-bar">
-                          <div className="trusted-badge-fill" style={{ width: `${(resolvedCount / TRUSTED_THRESHOLD) * 100}%` }} />
+                {/* ── Trusted Nagrik Badge — shown after complaints load ── */}
+                {!loadingComplaints && (
+                  <div className={`trusted-badge-block ${trusted ? 'earned' : ''}`}>
+                    {trusted ? (
+                      <>
+                        <div className="trusted-badge-title earned">✅ Trusted Nagrik</div>
+                        <div className="trusted-badge-sub">{resolvedCount} complaints resolved by BMC</div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="trusted-badge-title">⬜ Trusted Nagrik</div>
+                        <div className="trusted-badge-progress">
+                          <div className="trusted-badge-bar">
+                            <div className="trusted-badge-fill" style={{ width: `${(resolvedCount / TRUSTED_THRESHOLD) * 100}%` }} />
+                          </div>
+                          <div className="trusted-badge-hint">
+                            {resolvedCount}/{TRUSTED_THRESHOLD} resolved — {remaining} more needed
+                          </div>
                         </div>
-                        <div className="trusted-badge-hint">
-                          {resolvedCount}/{TRUSTED_THRESHOLD} complaints resolved — {remaining} more needed
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
               <button className="profile-close" onClick={() => setShowProfile(false)}>✕</button>
             </div>
