@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import emailjs from '@emailjs/browser'
 import { db } from '../firebase'
 import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore'
+import { useLanguage } from '../hooks/useLanguage'
 
 const ROASTS = {
   Pothole: [
@@ -37,27 +38,23 @@ const getRoast = (issueType, wardName) => {
   return pick.replace(/{ward}/g, wardName.replace(/ /g, ''))
 }
 
-// ─── Props ────────────────────────────────────────────────────────────────────
-// photoDataUrl  — base64 data URL passed from App.jsx (replaces fetching preview blob)
-// preview       — object URL for <img> display only (still used for canvas drawImage)
-// ─────────────────────────────────────────────────────────────────────────────
 export default function Step3({ result, location, preview, photoDataUrl, user, complaintId }) {
+  const { t } = useLanguage()
   const canvasRef = useRef(null)
   const [roast] = useState(() => getRoast(result.issueType, location.ward.name))
-  const [storyReady, setStoryReady] = useState(false)
-  const [storyDataUrl, setStoryDataUrl] = useState(null)
-  const [copied, setCopied] = useState(false)
-  const [showEmailPreview, setShowEmailPreview] = useState(false)
-  const [emailSending, setEmailSending] = useState(false)
-  const [emailSent, setEmailSent] = useState(false)
-  const [emailError, setEmailError] = useState('')
+  const [storyReady, setStoryReady]               = useState(false)
+  const [storyDataUrl, setStoryDataUrl]           = useState(null)
+  const [copied, setCopied]                       = useState(false)
+  const [showEmailPreview, setShowEmailPreview]   = useState(false)
+  const [emailSending, setEmailSending]           = useState(false)
+  const [emailSent, setEmailSent]                 = useState(false)
+  const [emailError, setEmailError]               = useState('')
   const [editableEmailBody, setEditableEmailBody] = useState('')
-  const [photoBase64, setPhotoBase64] = useState('')
+  const [photoBase64, setPhotoBase64]             = useState('')
 
   const trackingUrl = `${window.location.origin}/complaint/${complaintId}`
 
   useEffect(() => {
-    // Use the base64 already computed in App.jsx — no need to re-fetch the blob
     if (photoDataUrl) setPhotoBase64(photoDataUrl)
     if (preview) drawStory()
   }, [])
@@ -102,38 +99,28 @@ NagrikAI Platform`
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     canvas.width = 1080; canvas.height = 1920
-
     const img = new Image()
     img.src = preview
     img.onload = () => {
-      ctx.fillStyle = '#0D0D0D'
-      ctx.fillRect(0, 0, 1080, 1920)
-
+      ctx.fillStyle = '#0D0D0D'; ctx.fillRect(0, 0, 1080, 1920)
       const imgAspect = img.width / img.height
       const drawW = 1080, drawH = drawW / imgAspect
       ctx.drawImage(img, 0, (1920 - drawH) / 2, drawW, drawH)
-
       const topGrad = ctx.createLinearGradient(0, 0, 0, 500)
-      topGrad.addColorStop(0, 'rgba(0,0,0,0.92)')
-      topGrad.addColorStop(1, 'rgba(0,0,0,0)')
+      topGrad.addColorStop(0, 'rgba(0,0,0,0.92)'); topGrad.addColorStop(1, 'rgba(0,0,0,0)')
       ctx.fillStyle = topGrad; ctx.fillRect(0, 0, 1080, 500)
-
       const botGrad = ctx.createLinearGradient(0, 1200, 0, 1920)
-      botGrad.addColorStop(0, 'rgba(0,0,0,0)')
-      botGrad.addColorStop(1, 'rgba(0,0,0,0.97)')
+      botGrad.addColorStop(0, 'rgba(0,0,0,0)'); botGrad.addColorStop(1, 'rgba(0,0,0,0.97)')
       ctx.fillStyle = botGrad; ctx.fillRect(0, 0, 1080, 1920)
-
       ctx.fillStyle = '#FF6B00'; ctx.font = 'bold 82px Arial'; ctx.textAlign = 'left'
       ctx.fillText('Nagrik', 60, 110)
       ctx.fillStyle = '#ffffff'; ctx.fillText('AI', 348, 110)
       ctx.fillStyle = '#ffffff66'; ctx.font = '30px Arial'
       ctx.fillText('Mumbai Civic Report • ' + new Date().toLocaleDateString('en-IN'), 60, 155)
-
       ctx.fillStyle = '#ffffff15'; ctx.beginPath()
       ctx.roundRect(60, 172, 520, 52, 10); ctx.fill()
       ctx.fillStyle = '#FF6B00'; ctx.font = 'bold 26px Arial'
       ctx.fillText(`🔖 ID: ${complaintId}`, 75, 206)
-
       const badgeColor = result.severity === 'High' ? '#FF3B30' : result.severity === 'Medium' ? '#FF9500' : '#34C759'
       ctx.fillStyle = badgeColor; ctx.beginPath()
       ctx.roundRect(60, 242, 520, 88, 44); ctx.fill()
@@ -143,7 +130,6 @@ NagrikAI Platform`
       ctx.roundRect(600, 242, 260, 88, 44); ctx.fill()
       ctx.fillStyle = badgeColor; ctx.font = 'bold 40px Arial'
       ctx.fillText(`${result.severity} ⚡`, 730, 298)
-
       ctx.fillStyle = '#ffffff'; ctx.font = 'bold 52px Arial'; ctx.textAlign = 'left'
       ctx.fillText(`📍 ${location.ward.name}`, 60, 1500)
       ctx.fillStyle = '#ffcc00'; ctx.font = '38px Arial'
@@ -152,22 +138,18 @@ NagrikAI Platform`
         ctx.fillStyle = '#cccccc'; ctx.font = '32px Arial'
         ctx.fillText(result.addressDetail.substring(0, 46), 60, 1602)
       }
-
       ctx.fillStyle = '#ffffff'; ctx.font = '40px Arial'; ctx.textAlign = 'center'
       wrapText(ctx, roast, 540, 1660, 960, 56)
-
       ctx.fillStyle = '#FF6B00'; ctx.fillRect(0, 1860, 1080, 60)
       ctx.fillStyle = '#fff'; ctx.font = 'bold 26px Arial'; ctx.textAlign = 'center'
       ctx.fillText(`nagrik-ai.vercel.app/complaint/${complaintId}`, 540, 1898)
-
       setStoryDataUrl(canvas.toDataURL('image/jpeg', 0.95))
       setStoryReady(true)
     }
   }
 
   const wrapText = (ctx, text, x, y, maxWidth, lineHeight) => {
-    const words = text.split(' ')
-    let line = ''
+    const words = text.split(' '); let line = ''
     for (let i = 0; i < words.length; i++) {
       const test = line + words[i] + ' '
       if (ctx.measureText(test).width > maxWidth && i > 0) {
@@ -179,9 +161,7 @@ NagrikAI Platform`
 
   const downloadStory = () => {
     const a = document.createElement('a')
-    a.href = storyDataUrl
-    a.download = `NagrikAI-${complaintId}.jpg`
-    a.click()
+    a.href = storyDataUrl; a.download = `NagrikAI-${complaintId}.jpg`; a.click()
   }
 
   const copyCaption = () => {
@@ -192,17 +172,14 @@ NagrikAI Platform`
   const shareOnX = () => {
     if (storyReady && storyDataUrl) {
       const a = document.createElement('a')
-      a.href = storyDataUrl
-      a.download = `NagrikAI-${complaintId}.jpg`
-      a.click()
+      a.href = storyDataUrl; a.download = `NagrikAI-${complaintId}.jpg`; a.click()
     }
     setTimeout(() => {
       const text = encodeURIComponent(
         `🚨 Civic Issue Reported — ${location.ward.name}, Mumbai!\n` +
         `Issue: ${result.issueType} | Severity: ${result.severity}\n` +
         (result.addressDetail ? `📍 ${result.addressDetail}\n` : '') +
-        `\n${roast}\n\n` +
-        `Track complaint 👉 ${trackingUrl}\n\n` +
+        `\n${roast}\n\nTrack complaint 👉 ${trackingUrl}\n\n` +
         `@mybmc #FixMumbai #${location.ward.name.replace(/ /g, '')} #NagrikAI`
       )
       window.open(`https://twitter.com/intent/tweet?text=${text}`, '_blank')
@@ -210,41 +187,30 @@ NagrikAI Platform`
   }
 
   const sendEmail = async () => {
-    setEmailSending(true)
-    setEmailError('')
+    setEmailSending(true); setEmailError('')
     try {
       await emailjs.send(
         import.meta.env.VITE_EMAILJS_SERVICE_ID,
         import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
         {
-          to_email: location.ward.wardOfficeEmail,
-          complaint_id: complaintId,
-          issue_type: result.issueType,
-          severity: result.severity,
-          ward: location.ward.ward,
-          ward_name: location.ward.name,
+          to_email: location.ward.wardOfficeEmail, complaint_id: complaintId,
+          issue_type: result.issueType, severity: result.severity,
+          ward: location.ward.ward, ward_name: location.ward.name,
           address_detail: result.addressDetail || 'Not specified',
-          gps: `${location.lat}, ${location.lng}`,
-          description: result.description,
+          gps: `${location.lat}, ${location.lng}`, description: result.description,
           user_name: `${user.firstName} ${user.lastName}`,
-          user_mobile: user.mobile,
-          user_email: user.email,
-          tracking_url: trackingUrl,
+          user_mobile: user.mobile, user_email: user.email, tracking_url: trackingUrl,
         },
         import.meta.env.VITE_EMAILJS_PUBLIC_KEY
       )
-
       const q = query(collection(db, 'complaints'), where('complaintId', '==', complaintId))
       const snap = await getDocs(q)
       if (!snap.empty) {
         await updateDoc(doc(db, 'complaints', snap.docs[0].id), {
-          status: 'Reported',
-          emailSentAt: new Date().toISOString()
+          status: 'Reported', emailSentAt: new Date().toISOString()
         })
       }
-
-      setEmailSent(true)
-      setShowEmailPreview(false)
+      setEmailSent(true); setShowEmailPreview(false)
     } catch (err) {
       console.error('EmailJS error:', err)
       setEmailError('Email send nahi hua — dobara try karo')
@@ -311,19 +277,17 @@ NagrikAI Platform`
       <div className="s3-wrap">
         <div className="s3-id-card">
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="s3-id-label">Complaint ID</div>
+            <div className="s3-id-label">{t('complaintId')}</div>
             <div className="s3-id-value">{complaintId}</div>
             <div className="s3-id-url">🔗 {trackingUrl}</div>
           </div>
-          <button
-            className={`s3-copy-btn ${copied ? 'done' : ''}`}
-            onClick={() => { navigator.clipboard.writeText(trackingUrl); setCopied(true); setTimeout(() => setCopied(false), 2500) }}
-          >
+          <button className={`s3-copy-btn ${copied ? 'done' : ''}`}
+            onClick={() => { navigator.clipboard.writeText(trackingUrl); setCopied(true); setTimeout(() => setCopied(false), 2500) }}>
             {copied ? '✅ Copied' : '📋 Copy Link'}
           </button>
         </div>
 
-        <div className="s3-section-label">Ward Officer</div>
+        <div className="s3-section-label">{t('wardOfficer')}</div>
         <div className="s3-officer-card">
           <div className="s3-officer-avatar">👮</div>
           <div>
@@ -333,17 +297,15 @@ NagrikAI Platform`
           </div>
         </div>
 
-        <div className="s3-section-label">Instagram Story</div>
+        <div className="s3-section-label">{t('instagramStory')}</div>
         {!storyReady && (
           <div className="s3-loading-story">
             <div className="s3-loading-spinner" />
-            <div style={{ color: '#555', fontSize: 13 }}>Story generate ho rahi hai...</div>
+            <div style={{ color: '#555', fontSize: 13 }}>{t('storyGenerating')}</div>
           </div>
         )}
         {storyReady && storyDataUrl && (
-          <div className="s3-story-wrap">
-            <img src={storyDataUrl} alt="Story Preview" />
-          </div>
+          <div className="s3-story-wrap"><img src={storyDataUrl} alt="Story Preview" /></div>
         )}
 
         <div className="s3-roast-box">
@@ -351,62 +313,53 @@ NagrikAI Platform`
         </div>
 
         {storyReady && (
-          <button className="s3-btn s3-btn-orange" onClick={downloadStory}>⬇️ Story Download Karo</button>
+          <button className="s3-btn s3-btn-orange" onClick={downloadStory}>{t('downloadStory')}</button>
         )}
 
-        <button className="s3-btn s3-btn-x" onClick={shareOnX}>𝕏 &nbsp;X pe Share Karo</button>
-        <div className="s3-x-hint">📥 Story auto download hogi → phir tweet window khulega → image attach karo</div>
+        <button className="s3-btn s3-btn-x" onClick={shareOnX}>{t('shareOnX')}</button>
+        <div className="s3-x-hint">{t('xHint')}</div>
 
         {emailSent ? (
-          <button className="s3-btn s3-btn-success" disabled>✅ Email Bhej Diya — {location.ward.wardOfficerName} ko</button>
+          <button className="s3-btn s3-btn-success" disabled>{t('emailSent', location.ward.wardOfficerName)}</button>
         ) : (
-          <button className="s3-btn s3-btn-dark" onClick={openEmailModal}>📧 Ward Officer ko Email Bhejo</button>
+          <button className="s3-btn s3-btn-dark" onClick={openEmailModal}>{t('emailOfficer')}</button>
         )}
 
         {emailError && <div className="s3-error-msg">⚠️ {emailError}</div>}
 
         <button className="s3-btn s3-btn-ghost" onClick={copyCaption}>
-          {copied ? '✅ Caption Copied!' : '📋 Caption Copy Karo'}
+          {copied ? t('captionCopied') : t('copyCaption')}
         </button>
 
         <button className="s3-btn s3-btn-ghost" onClick={() => window.dispatchEvent(new CustomEvent('restartApp'))}>
-          🔄 Naya Issue Report Karo
+          {t('newReport')}
         </button>
       </div>
 
       {showEmailPreview && (
         <div className="s3-modal-overlay" onClick={() => !emailSending && setShowEmailPreview(false)}>
           <div className="s3-modal-sheet" onClick={e => e.stopPropagation()}>
-            <div className="s3-modal-title">📧 Email Preview</div>
+            <div className="s3-modal-title">{t('emailPreview')}</div>
             <div className="s3-modal-sub">
               Jayegi → <span className="s3-modal-to">{location.ward.wardOfficeEmail}</span>
               <br /><span style={{ fontSize: 11, color: '#3A3A3A' }}>✅ Directly background mein send hogi</span>
             </div>
-
-            {/* Show photo from base64 — works even without Firebase Storage */}
             {(photoBase64 || preview) && (
               <>
-                <div style={{ fontSize: 10, color: '#555', letterSpacing: 1, textTransform: 'uppercase', fontWeight: 700, marginBottom: 8 }}>📷 Attached Photo</div>
+                <div style={{ fontSize: 10, color: '#555', letterSpacing: 1, textTransform: 'uppercase', fontWeight: 700, marginBottom: 8 }}>{t('attachedPhoto')}</div>
                 <img src={photoBase64 || preview} className="s3-modal-photo" alt="Issue Photo" />
               </>
             )}
-
             <div className="s3-email-edit-label">
-              ✏️ Email Body
-              <span className="s3-edit-badge">EDITABLE</span>
+              {t('emailBody')}
+              <span className="s3-edit-badge">{t('editable')}</span>
             </div>
-            <textarea
-              className="s3-email-textarea"
-              value={editableEmailBody}
-              onChange={e => setEditableEmailBody(e.target.value)}
-              disabled={emailSending}
-              spellCheck={false}
-            />
-            <div className="s3-photo-note">📎 Photo automatically email mein inline attach hogi.</div>
+            <textarea className="s3-email-textarea" value={editableEmailBody} onChange={e => setEditableEmailBody(e.target.value)} disabled={emailSending} spellCheck={false} />
+            <div className="s3-photo-note">{t('photoNote')}</div>
             <div className="s3-modal-actions">
-              <button className="s3-btn s3-btn-ghost" onClick={() => setShowEmailPreview(false)} disabled={emailSending}>Cancel</button>
+              <button className="s3-btn s3-btn-ghost" onClick={() => setShowEmailPreview(false)} disabled={emailSending}>{t('cancel')}</button>
               <button className="s3-btn s3-btn-orange" onClick={sendEmail} disabled={emailSending}>
-                {emailSending ? <><div className="s3-spinner-sm" /> Bhej raha hai...</> : '🚀 Bhejo Email'}
+                {emailSending ? <><div className="s3-spinner-sm" /> {t('sendingEmail')}</> : t('sendEmail')}
               </button>
             </div>
           </div>

@@ -1,169 +1,572 @@
-import { useState } from 'react'
-import { db } from '../firebase'
-import { collection, addDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore'
+import { useState, useEffect } from 'react'
+import { GoogleGenerativeAI } from '@google/generative-ai'
+import { collection, addDoc, query, where, getDocs, doc, updateDoc, arrayUnion } from 'firebase/firestore'
+import { db } from './firebase'
+import MapView from './components/MapView'
+import Step3 from './components/Step3'
+import Signup from './components/Signup'
+import { detectWard, generateComplaintId } from './data/wardData'
+import 'leaflet/dist/leaflet.css'
+import { useLanguage } from './hooks/useLanguage'
+import LangToggle from './components/LangToggle'
 
-export default function Signup({ onComplete }) {
-  const [mobile, setMobile]       = useState('')
-  const [form, setForm]           = useState({ firstName: '', lastName: '', email: '' })
-  const [step, setStep]           = useState('mobile')   // 'mobile' | 'register'
-  const [loading, setLoading]     = useState(false)
-  const [error, setError]         = useState('')
+const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY)
 
-  // ── Step 1: user enters mobile → check Firestore ──
-  const handleMobileCheck = async () => {
-    if (mobile.length !== 10) { setError('Valid 10-digit mobile daalo'); return }
-    setLoading(true)
-    setError('')
-    try {
-      const snap = await getDocs(
-        query(collection(db, 'users'), where('mobile', '==', mobile))
-      )
-      if (!snap.empty) {
-        // Returning user — fetch from Firestore and login directly
-        const docSnap = snap.docs[0]
-        const userData = { ...docSnap.data(), id: docSnap.id }
-        localStorage.setItem('nagrik_user', JSON.stringify(userData))
-        onComplete(userData)
-        return
+const severityColor = (s) => s === 'High' ? '#FF3B30' : s === 'Medium' ? '#FF9500' : '#34C759'
+const severityBg   = (s) => s === 'High' ? '#FF3B3018' : s === 'Medium' ? '#FF950018' : '#34C75918'
+const issueIcon    = (t) => ({ Pothole: '🕳️', Garbage: '🗑️', 'Broken Streetlight': '💡', Waterlogging: '🌊' }[t] || '⚠️')
+
+// ── Trusted Nagrik: 5 resolved complaints = badge ─────────────────────────
+const TRUSTED_THRESHOLD = 5
+const isTrusted = (resolvedCount) => (resolvedCount || 0) >= TRUSTED_THRESHOLD
+
+const compressImage = (file) =>
+  new Promise((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      const MAX = 800
+      let { width, height } = img
+      if (width > MAX || height > MAX) {
+        if (width > height) { height = Math.round(height * MAX / width); width = MAX }
+        else                { width  = Math.round(width  * MAX / height); height = MAX }
       }
-      // New user — show registration fields
-      setStep('register')
-    } catch (e) {
-      console.error(e)
-      setError('Network error. Try again.')
+      const canvas = document.createElement('canvas')
+      canvas.width = width; canvas.height = height
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+      URL.revokeObjectURL(url)
+      resolve(canvas.toDataURL('image/jpeg', 0.6))
     }
-    setLoading(false)
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null) }
+    img.src = url
+  })
+
+export default function App() {
+  const { t } = useLanguage()
+
+  const [user, setUser]                           = useState(null)
+  const [result, setResult]                       = useState(null)
+  const [location, setLocation]                   = useState(null)
+  const [loading, setLoading]                     = useState(false)
+  const [preview, setPreview]                     = useState(null)
+  const [step, setStep]                           = useState(1)
+  const [addressInput, setAddressInput]           = useState('')
+  const [complaintId, setComplaintId]             = useState(null)
+  const [saving, setSaving]                       = useState(false)
+  const [showProfile, setShowProfile]             = useState(false)
+  const [complaints, setComplaints]               = useState([])
+  const [loadingComplaints, setLoadingComplaints] = useState(false)
+  const [photoError, setPhotoError]               = useState('')
+  const [existingComplaint, setExistingComplaint] = useState(null)
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false)
+  const [supported, setSupported]                 = useState(false)
+  const [photoBase64, setPhotoBase64]             = useState(null)
+
+  const trusted = isTrusted(user?.resolvedCount)
+  const resolvedCount = user?.resolvedCount || 0
+  const remaining = TRUSTED_THRESHOLD - resolvedCount
+
+  useEffect(() => {
+    const saved = localStorage.getItem('nagrik_user')
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        if (parsed && parsed.id) setUser(parsed)
+        else localStorage.removeItem('nagrik_user')
+      } catch (e) { localStorage.removeItem('nagrik_user') }
+    }
+
+    navigator.geolocation.watchPosition(
+      (pos) => {
+        const ward = detectWard(pos.coords.latitude, pos.coords.longitude)
+        setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude, ward })
+      },
+      () => {
+        const ward = detectWard(19.0760, 72.8777)
+        setLocation({ lat: 19.0760, lng: 72.8777, ward })
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    )
+
+    const onRestart = () => {
+      setStep(1); setResult(null); setPreview(null)
+      setPhotoBase64(null)
+      setAddressInput(''); setComplaintId(null); setPhotoError('')
+      setExistingComplaint(null); setCheckingDuplicate(false); setSupported(false)
+    }
+    window.addEventListener('restartApp', onRestart)
+    return () => window.removeEventListener('restartApp', onRestart)
+  }, [])
+
+  useEffect(() => {
+    if (step === 2 && result && location) checkDuplicate()
+  }, [step])
+
+  // ── Auto-sync resolvedCount from Firestore complaints ───────────────────
+  // When complaints load, count resolved ones and update user if needed
+  const syncResolvedCount = async (uid, list) => {
+    const resolved = list.filter(c => c.status === 'Resolved').length
+    if (resolved !== (user?.resolvedCount || 0)) {
+      try {
+        await updateDoc(doc(db, 'users', uid), { resolvedCount: resolved })
+        const updatedUser = { ...user, resolvedCount: resolved }
+        localStorage.setItem('nagrik_user', JSON.stringify(updatedUser))
+        setUser(updatedUser)
+      } catch (e) { console.error('syncResolvedCount error:', e) }
+    }
   }
 
-  // ── Step 2: new user fills name + email ──
-  const handleRegister = async () => {
-    if (!form.firstName || !form.email) { setError('Name aur email zaroori hai'); return }
-    setLoading(true)
-    setError('')
+  const loadComplaints = async (uid) => {
+    setLoadingComplaints(true)
     try {
-      // Double-check — avoid duplicate if user pressed back
-      const snap = await getDocs(
-        query(collection(db, 'users'), where('mobile', '==', mobile))
-      )
-      let userData
-      if (!snap.empty) {
-        const docSnap = snap.docs[0]
-        userData = { ...docSnap.data(), id: docSnap.id }
-      } else {
-        const docRef = await addDoc(collection(db, 'users'), {
-          firstName: form.firstName,
-          lastName:  form.lastName,
-          mobile,
-          email:     form.email,
-          createdAt: serverTimestamp(),
-          reportsCount: 0,
-          points: 0,
-        })
-        userData = { firstName: form.firstName, lastName: form.lastName, mobile, email: form.email, id: docRef.id }
-      }
-      localStorage.setItem('nagrik_user', JSON.stringify(userData))
-      onComplete(userData)
-    } catch (e) {
-      console.error(e)
-      setError('Error saving data. Try again!')
-    }
-    setLoading(false)
+      const q = query(collection(db, 'complaints'), where('userId', '==', uid))
+      const snap = await getDocs(q)
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      setComplaints(list)
+      syncResolvedCount(uid, list)
+    } catch (e) { console.error('loadComplaints error:', e) }
+    setLoadingComplaints(false)
   }
+
+  const openProfile = () => {
+    if (user) loadComplaints(user.id)
+    setShowProfile(true)
+  }
+
+  const checkDuplicate = async () => {
+    setCheckingDuplicate(true)
+    try {
+      const q = query(
+        collection(db, 'complaints'),
+        where('ward', '==', location.ward.ward),
+        where('issueType', '==', result.issueType)
+      )
+      const snap = await getDocs(q)
+      const active = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(c => c.status !== 'Resolved' && c.userId !== user.id)
+      if (active.length > 0) setExistingComplaint(active[0])
+    } catch (e) { console.error(e) }
+    setCheckingDuplicate(false)
+  }
+
+  const supportExisting = async () => {
+    if (!existingComplaint) return
+    setSaving(true)
+    try {
+      await updateDoc(doc(db, 'complaints', existingComplaint.id), {
+        supportCount: (existingComplaint.supportCount || 0) + 1,
+        supporters: arrayUnion(user.id)
+      })
+      setSupported(true)
+    } catch (e) { console.error(e) }
+    setSaving(false)
+  }
+
+  const handlePhoto = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setPreview(URL.createObjectURL(file))
+    setPhotoError(''); setLoading(true)
+    try {
+      const compressed = await compressImage(file)
+      if (!compressed) throw new Error('Compression failed')
+      setPhotoBase64(compressed)
+      const base64 = compressed.split(',')[1]
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+      const res   = await model.generateContent([
+        { inlineData: { mimeType: 'image/jpeg', data: base64 } },
+        `You are a strict Mumbai civic issue detector for BMC.
+Analyze this image carefully.
+ONLY accept these valid civic problems visible in public areas/roads:
+Pothole, Garbage dumping, Broken Streetlight, Waterlogging.
+If image shows a valid civic issue → reply ONLY with JSON (no extra text):
+{"issueType":"Pothole/Garbage/Broken Streetlight/Waterlogging/Other","severity":"Low/Medium/High","description":"one line in English","isValid":true}
+If image is NOT a civic issue → reply with exactly: NOT_CIVIC_ISSUE
+Be very strict. When in doubt → NOT_CIVIC_ISSUE`
+      ])
+      const text  = res.response.text().trim()
+      const clean = text.replace(/```json|```/g, '').trim()
+      if (clean === 'NOT_CIVIC_ISSUE' || !clean.startsWith('{')) {
+        setLoading(false); setPreview(null); setPhotoBase64(null)
+        setPhotoError(t('photoErrorMsg')); return
+      }
+      const parsed = JSON.parse(clean)
+      setResult(parsed); setLoading(false); setStep(2)
+    } catch (err) {
+      console.error(err)
+      setLoading(false); setPreview(null); setPhotoBase64(null)
+      setPhotoError(t('photoErrorMsg'))
+    }
+  }
+
+  const handleProceed = async () => {
+    setSaving(true)
+    const cid = generateComplaintId()
+    setComplaintId(cid)
+    try {
+      await addDoc(collection(db, 'complaints'), {
+        complaintId: cid, userId: user.id,
+        userFirstName: user.firstName, userLastName: user.lastName,
+        userMobile: user.mobile, userEmail: user.email,
+        issueType: result.issueType, severity: result.severity,
+        description: result.description, addressDetail: addressInput.trim(),
+        ward: location.ward.ward, wardName: location.ward.name,
+        lat: location.lat, lng: location.lng,
+        createdAt: new Date().toISOString(), status: 'Pending',
+        beforePhoto: photoBase64 || null, afterPhoto: null,
+        supportCount: 0, supporters: [],
+      })
+      loadComplaints(user.id)
+    } catch (e) { console.error('Firestore save error:', e) }
+    setResult(r => ({ ...r, addressDetail: addressInput.trim() }))
+    setSaving(false); setStep(3)
+  }
+
+  if (!user) return <Signup onComplete={(u) => setUser(u)} />
 
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #0D0D0D; }
-        .sg-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; background: #0D0D0D; font-family: 'DM Sans', sans-serif; }
-        .sg-card { width: 100%; max-width: 400px; background: #141414; border-radius: 28px; padding: 36px 28px; border: 1px solid #1E1E1E; }
-        .sg-flag { font-size: 52px; display: block; text-align: center; margin-bottom: 12px; }
-        .sg-title { font-family: 'Syne', sans-serif; font-size: 34px; font-weight: 800; color: #FF6B00; text-align: center; }
-        .sg-sub { font-size: 14px; color: #555; text-align: center; margin-top: 6px; margin-bottom: 28px; line-height: 1.6; }
-        .sg-mobile-row { display: flex; gap: 10px; margin-bottom: 12px; }
-        .sg-input { width: 100%; background: #1A1A1A; border: 1.5px solid #252525; border-radius: 14px; padding: 14px 16px; color: #fff; font-size: 15px; font-family: 'DM Sans', sans-serif; outline: none; transition: border-color 0.2s; margin-bottom: 12px; display: block; }
-        .sg-input:focus { border-color: #FF6B00; }
-        .sg-input::placeholder { color: #333; }
-        .sg-input.no-mb { margin-bottom: 0; }
-        .sg-btn { width: 100%; background: #FF6B00; color: #fff; border: none; border-radius: 14px; padding: 16px; font-size: 16px; font-weight: 700; font-family: 'DM Sans', sans-serif; cursor: pointer; transition: background 0.2s; }
-        .sg-btn:hover:not(:disabled) { background: #E55A00; }
-        .sg-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .sg-btn-sm { background: #FF6B00; color: #fff; border: none; border-radius: 14px; padding: 14px 20px; font-size: 15px; font-weight: 700; font-family: 'DM Sans', sans-serif; cursor: pointer; white-space: nowrap; transition: background 0.2s; flex-shrink: 0; }
-        .sg-btn-sm:hover:not(:disabled) { background: #E55A00; }
-        .sg-btn-sm:disabled { opacity: 0.5; cursor: not-allowed; }
-        .sg-back { background: transparent; border: none; color: #555; font-size: 13px; cursor: pointer; font-family: 'DM Sans', sans-serif; display: flex; align-items: center; gap: 5px; margin-bottom: 18px; padding: 0; }
-        .sg-back:hover { color: #888; }
-        .sg-mobile-display { background: #FF6B0012; border: 1px solid #FF6B0030; border-radius: 12px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; color: #FF6B00; font-weight: 600; }
-        .sg-error { color: #FF3B30; font-size: 13px; text-align: center; margin-bottom: 10px; }
-        .sg-privacy { font-size: 12px; color: #2A2A2A; text-align: center; margin-top: 14px; }
-        .sg-divider { text-align: center; color: #2A2A2A; font-size: 12px; margin: 16px 0; }
+        body { background: #0D0D0D; min-height: 100vh; }
+        .app { max-width: 430px; margin: 0 auto; min-height: 100vh; background: #0D0D0D; color: #fff; font-family: 'DM Sans', sans-serif; }
+        .hdr { padding: 20px 20px 0; display: flex; align-items: center; justify-content: space-between; }
+        .logo { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800; letter-spacing: -0.5px; }
+        .logo span { color: #FF6B00; }
+        .hdr-right { display: flex; align-items: center; gap: 8px; }
+        .step-dots { display: flex; align-items: center; gap: 5px; }
+        .sd { width: 6px; height: 6px; border-radius: 3px; background: #222; transition: all 0.3s; }
+        .sd.active { width: 18px; background: #FF6B00; }
+        .sd.done { background: #34C759; }
+        .user-chip { background: #1A1A1A; border: 1px solid #242424; border-radius: 100px; padding: 5px 12px 5px 6px; display: flex; align-items: center; gap: 6px; cursor: pointer; transition: border-color 0.2s; }
+        .user-chip:hover { border-color: #FF6B00; }
+        .user-chip.trusted-chip { border-color: #34C75940; }
+        .user-chip.trusted-chip:hover { border-color: #34C759; }
+        .user-av { width: 26px; height: 26px; background: #FF6B00; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; }
+        .user-nm { font-size: 13px; font-weight: 600; color: #bbb; }
+        .trusted-chip-badge { font-size: 10px; background: #34C75918; color: #34C759; border: 1px solid #34C75935; border-radius: 6px; padding: 2px 6px; font-weight: 700; white-space: nowrap; }
+        .welcome { margin: 10px 20px 4px; padding: 9px 14px; background: #FF6B000D; border: 1px solid #FF6B0025; border-radius: 10px; font-size: 13px; color: #FF6B00; }
+        .loc-bar { margin: 10px 20px; background: #1A1A1A; border: 1px solid #222; border-radius: 12px; padding: 11px 15px; display: flex; align-items: center; gap: 8px; }
+        .loc-dot { width: 8px; height: 8px; border-radius: 50%; background: #34C759; animation: pulse 2s infinite; flex-shrink: 0; }
+        .loc-dot.detecting { background: #FF9500; }
+        @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.55;transform:scale(1.25)} }
+        .loc-text { font-size: 13px; color: #888; flex: 1; }
+        .loc-text strong { color: #fff; }
+        .ward-pill { background: #FF6B0018; border: 1px solid #FF6B0040; color: #FF6B00; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 7px; white-space: nowrap; }
+        .upload-wrap { padding: 10px 20px 24px; }
+        .upload-card { background: #141414; border: 2px dashed #252525; border-radius: 24px; padding: 40px 20px; text-align: center; position: relative; overflow: hidden; }
+        .upload-card::before { content:''; position:absolute; inset:0; background: radial-gradient(circle at 50% 40%, #FF6B000A 0%, transparent 65%); pointer-events:none; }
+        .upload-icon { font-size: 50px; display: block; margin-bottom: 12px; }
+        .upload-title { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 800; margin-bottom: 6px; }
+        .upload-sub { font-size: 13px; color: #555; margin-bottom: 22px; line-height: 1.6; }
+        .cam-label { display: inline-block; background: #FF6B00; color: #fff; padding: 13px 28px; border-radius: 14px; font-size: 15px; font-weight: 700; cursor: pointer; transition: background 0.2s; position: relative; }
+        .cam-label:hover { background: #E55A00; }
+        .cam-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+        .preview-img { width: 100%; border-radius: 14px; margin-top: 16px; display: block; }
+        .ai-loading { display: inline-flex; align-items: center; gap: 10px; background: #1E1E1E; border: 1px solid #2A2A2A; padding: 11px 20px; border-radius: 100px; margin-top: 14px; }
+        .spin { width: 16px; height: 16px; border: 2px solid #2A2A2A; border-top-color: #FF6B00; border-radius: 50%; animation: sp 0.8s linear infinite; }
+        @keyframes sp { to { transform: rotate(360deg); } }
+        .ai-txt { font-size: 13px; color: #888; }
+        .photo-error { margin: 12px 0 0; background: #FF3B3012; border: 1px solid #FF3B3035; color: #FF3B30; padding: 13px 16px; border-radius: 14px; font-size: 14px; line-height: 1.6; text-align: center; }
+        .photo-error-icon { font-size: 28px; display: block; margin-bottom: 6px; }
+        .result-wrap { padding: 0 20px 24px; }
+        .sec-label { font-size: 11px; color: #555; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; font-weight: 600; }
+        .issue-card { background: #141414; border-radius: 20px; overflow: hidden; margin-bottom: 12px; border: 1px solid #1E1E1E; }
+        .issue-hdr { padding: 16px 18px; display: flex; align-items: flex-start; gap: 14px; }
+        .issue-ico { width: 50px; height: 50px; border-radius: 14px; background: #1E1E1E; display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
+        .issue-info { flex: 1; }
+        .issue-type { font-family: 'Syne', sans-serif; font-size: 17px; font-weight: 800; margin-bottom: 4px; }
+        .issue-desc { font-size: 13px; color: #777; line-height: 1.55; }
+        .sev-tag { display: inline-flex; align-items: center; gap: 5px; padding: 4px 12px; border-radius: 100px; font-size: 12px; font-weight: 700; margin-top: 9px; }
+        .divider { height: 1px; background: #1E1E1E; }
+        .loc-info { padding: 13px 18px; display: flex; align-items: center; gap: 12px; }
+        .loc-info-ico { font-size: 18px; }
+        .loc-info-det { flex: 1; }
+        .loc-area { font-size: 14px; font-weight: 600; }
+        .loc-ward { font-size: 12px; color: #555; margin-top: 2px; }
+        .loc-covers { font-size: 11px; color: #3A3A3A; margin-top: 3px; }
+        .officer-bar { background: #141414; border: 1px solid #1E1E1E; border-radius: 14px; padding: 13px 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 12px; }
+        .officer-av { width: 38px; height: 38px; background: #1E1E1E; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+        .officer-name { font-size: 13px; font-weight: 700; }
+        .officer-desig { font-size: 11px; color: #555; margin-top: 2px; }
+        .addr-wrap { margin-bottom: 12px; }
+        .addr-box { background: #141414; border: 1.5px solid #252525; border-radius: 16px; padding: 14px 16px; transition: border-color 0.2s; }
+        .addr-box:focus-within { border-color: #FF6B00; }
+        .addr-lbl { font-size: 10px; color: #FF6B00; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700; margin-bottom: 8px; }
+        .addr-input { width: 100%; background: transparent; border: none; color: #ddd; font-size: 14px; font-family: 'DM Sans', sans-serif; outline: none; resize: none; line-height: 1.65; }
+        .addr-input::placeholder { color: #333; }
+        .addr-hint { font-size: 11px; color: #3A3A3A; margin-top: 8px; line-height: 1.5; }
+        .map-wrap { border-radius: 18px; overflow: hidden; margin-bottom: 12px; }
+        .action-btn { width: 100%; padding: 15px; border: none; border-radius: 16px; font-size: 16px; font-weight: 700; cursor: pointer; font-family: 'DM Sans', sans-serif; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s; background: #FF6B00; color: #fff; }
+        .action-btn:hover:not(:disabled) { background: #E55A00; transform: translateY(-1px); }
+        .action-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+        .profile-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.82); z-index: 999; display: flex; align-items: flex-end; }
+        .profile-sheet { background: #0F0F0F; border-radius: 28px 28px 0 0; padding: 24px 20px 44px; width: 100%; max-height: 88vh; overflow-y: auto; }
+        .profile-hdr { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 20px; }
+        .profile-av { width: 50px; height: 50px; background: #FF6B00; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 21px; font-weight: 800; flex-shrink: 0; }
+        .profile-name { font-family: 'Syne', sans-serif; font-size: 19px; font-weight: 800; }
+        .profile-meta { font-size: 12px; color: #444; margin-top: 3px; }
+        .profile-count { font-size: 12px; color: #FF6B00; margin-top: 4px; font-weight: 600; }
+        .trusted-badge-block { margin-top: 8px; background: #34C75912; border: 1px solid #34C75935; border-radius: 12px; padding: 10px 14px; }
+        .trusted-badge-title { font-size: 13px; font-weight: 700; color: #34C759; display: flex; align-items: center; gap: 6px; }
+        .trusted-badge-sub { font-size: 11px; color: #34C75990; margin-top: 3px; }
+        .trusted-badge-progress { margin-top: 8px; }
+        .trusted-badge-bar { height: 4px; border-radius: 2px; background: #1E1E1E; overflow: hidden; }
+        .trusted-badge-fill { height: 100%; border-radius: 2px; background: #34C759; transition: width 0.4s; }
+        .trusted-badge-hint { font-size: 10px; color: #444; margin-top: 4px; }
+        .profile-close { margin-left: auto; background: #1A1A1A; border: none; color: #666; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .c-card { background: #161616; border: 1px solid #1E1E1E; border-radius: 16px; padding: 14px 15px; margin-bottom: 10px; }
+        .c-card-hdr { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .c-ico { font-size: 20px; }
+        .c-type { font-size: 14px; font-weight: 700; flex: 1; }
+        .c-sev { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 6px; }
+        .c-id { font-size: 11px; color: #3A3A3A; font-family: monospace; margin-bottom: 6px; }
+        .c-address { font-size: 12px; color: #666; margin-bottom: 5px; }
+        .c-desc { font-size: 12px; color: #555; line-height: 1.5; margin-bottom: 6px; }
+        .c-meta { font-size: 11px; color: #3A3A3A; display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+        .c-status { display: inline-block; background: #FF6B0015; color: #FF6B00; padding: 2px 9px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+        .c-track { font-size: 11px; color: #FF6B00; cursor: pointer; margin-top: 4px; }
+        .c-track:hover { text-decoration: underline; }
+        .empty-state { text-align: center; padding: 48px 20px; color: #333; }
+        .logout-btn { width: 100%; margin-top: 16px; padding: 13px; background: transparent; border: 1px solid #1E1E1E; color: #444; border-radius: 14px; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 14px; transition: all 0.2s; }
+        .logout-btn:hover { border-color: #FF3B30; color: #FF3B30; }
       `}</style>
 
-      <div className="sg-wrap">
-        <div className="sg-card">
-          <span className="sg-flag">🇮🇳</span>
-          <div className="sg-title">NagrikAI</div>
+      <div className="app">
+        <div className="hdr">
+          <div className="logo">Nagrik<span>AI</span></div>
+          <div className="hdr-right">
+            <div className="step-dots">
+              <div className={`sd ${step >= 1 ? (step > 1 ? 'done' : 'active') : ''}`} />
+              <div className={`sd ${step >= 2 ? (step > 2 ? 'done' : 'active') : ''}`} />
+              <div className={`sd ${step >= 3 ? 'active' : ''}`} />
+            </div>
+            <LangToggle />
+            {/* User chip — shows Trusted badge if earned */}
+            <div className={`user-chip ${trusted ? 'trusted-chip' : ''}`} onClick={openProfile}>
+              <div className="user-av">{user.firstName[0]}</div>
+              <div className="user-nm">{user.firstName}</div>
+              {trusted && <span className="trusted-chip-badge">✓ Trusted</span>}
+            </div>
+          </div>
+        </div>
 
-          {step === 'mobile' && (
-            <>
-              <div className="sg-sub">
-                Apna mobile number daalo — naye ho toh register ho jaoge, pehle se ho toh seedha login.
+        {step === 1 && <div className="welcome">{t('welcome', user.firstName)}</div>}
+
+        <div className="loc-bar">
+          <div className={`loc-dot ${!location ? 'detecting' : ''}`} />
+          <div className="loc-text">
+            {location ? <><strong>{location.ward.name}</strong>, Mumbai</> : t('locationDetecting')}
+          </div>
+          {location && <div className="ward-pill">{t('ward')} {location.ward.ward}</div>}
+        </div>
+
+        {step === 1 && (
+          <div className="upload-wrap">
+            <div className="upload-card">
+              <span className="upload-icon">📸</span>
+              <div className="upload-title">{t('reportIssue')}</div>
+              <div className="upload-sub">{t('uploadSub')}</div>
+              <label className="cam-label">
+                {t('openCamera')}
+                <input className="cam-input" type="file" accept="image/*" capture="environment" onChange={handlePhoto} />
+              </label>
+              {preview && <img src={preview} className="preview-img" alt="Preview" />}
+              {loading && (
+                <div style={{ textAlign: 'center', paddingTop: 16 }}>
+                  <div className="ai-loading">
+                    <div className="spin" />
+                    <span className="ai-txt">{t('aiAnalyzing')}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+            {photoError && (
+              <div className="photo-error">
+                <span className="photo-error-icon">🚫</span>
+                {photoError}
               </div>
-              <div className="sg-mobile-row">
-                <input
-                  className="sg-input no-mb"
-                  placeholder="10-digit mobile number"
-                  value={mobile}
-                  maxLength={10}
-                  inputMode="numeric"
-                  onChange={e => { setMobile(e.target.value.replace(/\D/g, '')); setError('') }}
-                  onKeyDown={e => e.key === 'Enter' && handleMobileCheck()}
-                  style={{ flex: 1 }}
-                />
-                <button className="sg-btn-sm" onClick={handleMobileCheck} disabled={loading || mobile.length !== 10}>
-                  {loading ? '...' : '→'}
+            )}
+          </div>
+        )}
+
+        {step === 2 && result && location && (
+          <div className="result-wrap">
+            <div className="sec-label">{t('aiDetection')}</div>
+            <div className="issue-card">
+              <div className="issue-hdr">
+                <div className="issue-ico">{issueIcon(result.issueType)}</div>
+                <div className="issue-info">
+                  <div className="issue-type">{result.issueType}</div>
+                  <div className="issue-desc">{result.description}</div>
+                  <div className="sev-tag" style={{ background: severityBg(result.severity), color: severityColor(result.severity) }}>
+                    ● {result.severity} {t('severity')}
+                  </div>
+                </div>
+              </div>
+              <div className="divider" />
+              <div className="loc-info">
+                <div className="loc-info-ico">📍</div>
+                <div className="loc-info-det">
+                  <div className="loc-area">{location.ward.name}, Mumbai</div>
+                  <div className="loc-ward">BMC {t('ward')} {location.ward.ward}</div>
+                  <div className="loc-covers">{location.ward.areas.slice(0, 4).join(' · ')}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="sec-label">{t('wardOfficer')}</div>
+            <div className="officer-bar">
+              <div className="officer-av">👮</div>
+              <div>
+                <div className="officer-name">{location.ward.wardOfficerName}</div>
+                <div className="officer-desig">{location.ward.wardOfficerDesignation}</div>
+              </div>
+            </div>
+
+            <div className="sec-label">{t('exactLocation')}</div>
+            <div className="addr-wrap">
+              <div className="addr-box">
+                <div className="addr-lbl">📍 Address Details</div>
+                <textarea className="addr-input" rows={3} placeholder={t('addressPlaceholder')} value={addressInput} onChange={e => setAddressInput(e.target.value)} />
+                <div className="addr-hint">{t('addressHint')}</div>
+              </div>
+            </div>
+
+            <div className="sec-label">{t('locationOnMap')}</div>
+            <div className="map-wrap">
+              <MapView location={location} result={result} />
+            </div>
+
+            {checkingDuplicate ? (
+              <div style={{ textAlign: 'center', paddingTop: 8 }}>
+                <div className="ai-loading" style={{ width: '100%', justifyContent: 'center', borderRadius: 16, padding: 15 }}>
+                  <div className="spin" />
+                  <span className="ai-txt">{t('checkingDuplicate')}</span>
+                </div>
+              </div>
+            ) : supported && existingComplaint ? (
+              <div style={{ background: '#34C75918', border: '1px solid #34C75935', borderRadius: 16, padding: 16 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#34C759', lineHeight: 1.6 }}>
+                  {t('supportedMsg', existingComplaint.complaintId)}
+                </div>
+                <button className="action-btn" style={{ marginTop: 12, background: '#34C759' }}
+                  onClick={() => window.open(`${window.location.origin}/complaint/${existingComplaint.complaintId}`, '_blank')}>
+                  {t('openTrackingLink')}
                 </button>
               </div>
-              {error && <div className="sg-error">{error}</div>}
-              <div className="sg-divider">Ek number = ek account, kisi bhi device se</div>
-            </>
-          )}
-
-          {step === 'register' && (
-            <>
-              <button className="sg-back" onClick={() => { setStep('mobile'); setError('') }}>← Wapas</button>
-              <div className="sg-mobile-display">📱 +91 {mobile}</div>
-              <div className="sg-sub" style={{ marginBottom: 16 }}>Pehli baar ho? Thodi details do.</div>
-              <input
-                className="sg-input"
-                placeholder="First Name *"
-                value={form.firstName}
-                onChange={e => setForm({ ...form, firstName: e.target.value })}
-              />
-              <input
-                className="sg-input"
-                placeholder="Last Name"
-                value={form.lastName}
-                onChange={e => setForm({ ...form, lastName: e.target.value })}
-              />
-              <input
-                className="sg-input"
-                placeholder="Email Address *"
-                type="email"
-                value={form.email}
-                onChange={e => setForm({ ...form, email: e.target.value })}
-              />
-              {error && <div className="sg-error">{error}</div>}
-              <button className="sg-btn" onClick={handleRegister} disabled={loading}>
-                {loading ? 'Saving...' : 'Register Karo 🚀'}
+            ) : existingComplaint && !supported ? (
+              <div style={{ background: '#FF950018', border: '1px solid #FF950035', borderRadius: 16, padding: 16 }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#FF9500', marginBottom: 6 }}>
+                  {t('duplicateTitle', location.ward.ward)}
+                </div>
+                <div style={{ fontSize: 13, color: '#bbb', marginBottom: 10 }}>{t('duplicateSub')}</div>
+                <div style={{ fontSize: 12, color: '#FF9500', fontFamily: 'monospace', marginBottom: 14 }}>
+                  {t('complaintId')}: {existingComplaint.complaintId}
+                </div>
+                <button className="action-btn" onClick={supportExisting} disabled={saving}>
+                  {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} />{t('saving')}</> : t('supportBtn')}
+                </button>
+                <button className="action-btn" style={{ marginTop: 10, background: 'transparent', color: '#FF9500', border: '1px solid #FF950035' }}
+                  onClick={() => setExistingComplaint(null)}>
+                  {t('differentLocation')}
+                </button>
+              </div>
+            ) : (
+              <button className="action-btn" onClick={handleProceed} disabled={saving}>
+                {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} />{t('saving')}</> : t('submitBtn')}
               </button>
-            </>
-          )}
+            )}
+          </div>
+        )}
 
-          <div className="sg-privacy">🔒 Your data is safe. We never spam.</div>
-        </div>
+        {step === 3 && result && location && complaintId && (
+          <Step3 result={result} location={location} preview={preview} photoDataUrl={photoBase64} user={user} complaintId={complaintId} />
+        )}
       </div>
+
+      {showProfile && (
+        <div className="profile-overlay" onClick={() => setShowProfile(false)}>
+          <div className="profile-sheet" onClick={e => e.stopPropagation()}>
+            <div className="profile-hdr">
+              <div className="profile-av">{user.firstName[0]}</div>
+              <div style={{ flex: 1 }}>
+                <div className="profile-name">{user.firstName} {user.lastName}</div>
+                <div className="profile-meta">{user.mobile} • {user.email}</div>
+                <div className="profile-count">{t('complaints', complaints.length)}</div>
+
+                {/* ── Trusted Nagrik Badge Block ── */}
+                <div className="trusted-badge-block">
+                  {trusted ? (
+                    <>
+                      <div className="trusted-badge-title">✅ Trusted Nagrik</div>
+                      <div className="trusted-badge-sub">{resolvedCount} complaints resolved by BMC</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="trusted-badge-title" style={{ color: '#888' }}>⬜ Trusted Nagrik</div>
+                      <div className="trusted-badge-progress">
+                        <div className="trusted-badge-bar">
+                          <div className="trusted-badge-fill" style={{ width: `${(resolvedCount / TRUSTED_THRESHOLD) * 100}%` }} />
+                        </div>
+                        <div className="trusted-badge-hint">
+                          {resolvedCount}/{TRUSTED_THRESHOLD} complaints resolved — {remaining} more needed
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+              <button className="profile-close" onClick={() => setShowProfile(false)}>✕</button>
+            </div>
+
+            <div className="sec-label">{t('myComplaints')}</div>
+
+            {loadingComplaints && (
+              <div style={{ textAlign: 'center', padding: '32px 0', color: '#333' }}>
+                <div className="spin" style={{ borderColor: '#1E1E1E', borderTopColor: '#FF6B00', margin: '0 auto 10px', width: 24, height: 24 }} />
+                Loading...
+              </div>
+            )}
+
+            {!loadingComplaints && complaints.length === 0 && (
+              <div className="empty-state">
+                <div style={{ fontSize: 38, marginBottom: 12 }}>📋</div>
+                <div style={{ fontSize: 14 }}>{t('noComplaints')}</div>
+                <div style={{ fontSize: 12, marginTop: 6, color: '#2A2A2A' }}>{t('noComplaintsSub')}</div>
+              </div>
+            )}
+
+            {!loadingComplaints && complaints.map(c => (
+              <div className="c-card" key={c.id}>
+                <div className="c-card-hdr">
+                  <div className="c-ico">{issueIcon(c.issueType)}</div>
+                  <div className="c-type">{c.issueType}</div>
+                  <div className="c-sev" style={{ background: severityBg(c.severity), color: severityColor(c.severity) }}>{c.severity}</div>
+                </div>
+                <div className="c-id">ID: {c.complaintId}</div>
+                {c.addressDetail && <div className="c-address">📍 {c.addressDetail}</div>}
+                <div className="c-desc">{c.description}</div>
+                <div className="c-meta">
+                  <span>🏙 {t('ward')} {c.ward} — {c.wardName}</span>
+                  <span>🕐 {new Date(c.createdAt).toLocaleDateString('en-IN')}</span>
+                  <span className="c-status">{c.status}</span>
+                </div>
+                <div className="c-track" onClick={() => window.open(`${window.location.origin}/complaint/${c.complaintId}`, '_blank')}>
+                  🔗 {t('track')}: /complaint/{c.complaintId}
+                </div>
+              </div>
+            ))}
+
+            <button className="logout-btn" onClick={() => { localStorage.removeItem('nagrik_user'); setUser(null); setShowProfile(false) }}>
+              {t('logout')}
+            </button>
+          </div>
+        </div>
+      )}
     </>
   )
 }

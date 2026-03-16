@@ -16,6 +16,10 @@ const severityColor = (s) => s === 'High' ? '#FF3B30' : s === 'Medium' ? '#FF950
 const severityBg   = (s) => s === 'High' ? '#FF3B3018' : s === 'Medium' ? '#FF950018' : '#34C75918'
 const issueIcon    = (t) => ({ Pothole: '🕳️', Garbage: '🗑️', 'Broken Streetlight': '💡', Waterlogging: '🌊' }[t] || '⚠️')
 
+// ── Trusted Nagrik: 5 resolved complaints = badge ─────────────────────────
+const TRUSTED_THRESHOLD = 5
+const isTrusted = (resolvedCount) => (resolvedCount || 0) >= TRUSTED_THRESHOLD
+
 const compressImage = (file) =>
   new Promise((resolve) => {
     const img = new Image()
@@ -38,7 +42,7 @@ const compressImage = (file) =>
   })
 
 export default function App() {
-  const { t } = useLanguage()   // ← ADDED
+  const { t } = useLanguage()
 
   const [user, setUser]                           = useState(null)
   const [result, setResult]                       = useState(null)
@@ -58,19 +62,18 @@ export default function App() {
   const [supported, setSupported]                 = useState(false)
   const [photoBase64, setPhotoBase64]             = useState(null)
 
+  const trusted = isTrusted(user?.resolvedCount)
+  const resolvedCount = user?.resolvedCount || 0
+  const remaining = TRUSTED_THRESHOLD - resolvedCount
+
   useEffect(() => {
     const saved = localStorage.getItem('nagrik_user')
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
-        if (parsed && parsed.id) {
-          setUser(parsed)
-        } else {
-          localStorage.removeItem('nagrik_user')
-        }
-      } catch (e) {
-        localStorage.removeItem('nagrik_user')
-      }
+        if (parsed && parsed.id) setUser(parsed)
+        else localStorage.removeItem('nagrik_user')
+      } catch (e) { localStorage.removeItem('nagrik_user') }
     }
 
     navigator.geolocation.watchPosition(
@@ -99,6 +102,20 @@ export default function App() {
     if (step === 2 && result && location) checkDuplicate()
   }, [step])
 
+  // ── Auto-sync resolvedCount from Firestore complaints ───────────────────
+  // When complaints load, count resolved ones and update user if needed
+  const syncResolvedCount = async (uid, list) => {
+    const resolved = list.filter(c => c.status === 'Resolved').length
+    if (resolved !== (user?.resolvedCount || 0)) {
+      try {
+        await updateDoc(doc(db, 'users', uid), { resolvedCount: resolved })
+        const updatedUser = { ...user, resolvedCount: resolved }
+        localStorage.setItem('nagrik_user', JSON.stringify(updatedUser))
+        setUser(updatedUser)
+      } catch (e) { console.error('syncResolvedCount error:', e) }
+    }
+  }
+
   const loadComplaints = async (uid) => {
     setLoadingComplaints(true)
     try {
@@ -107,6 +124,7 @@ export default function App() {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
       list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       setComplaints(list)
+      syncResolvedCount(uid, list)
     } catch (e) { console.error('loadComplaints error:', e) }
     setLoadingComplaints(false)
   }
@@ -150,56 +168,35 @@ export default function App() {
     const file = e.target.files[0]
     if (!file) return
     setPreview(URL.createObjectURL(file))
-    setPhotoError('')
-    setLoading(true)
-
+    setPhotoError(''); setLoading(true)
     try {
       const compressed = await compressImage(file)
       if (!compressed) throw new Error('Compression failed')
-
       setPhotoBase64(compressed)
-
       const base64 = compressed.split(',')[1]
-
       const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
       const res   = await model.generateContent([
         { inlineData: { mimeType: 'image/jpeg', data: base64 } },
         `You are a strict Mumbai civic issue detector for BMC.
 Analyze this image carefully.
-
 ONLY accept these valid civic problems visible in public areas/roads:
 Pothole, Garbage dumping, Broken Streetlight, Waterlogging.
-
 If image shows a valid civic issue → reply ONLY with JSON (no extra text):
 {"issueType":"Pothole/Garbage/Broken Streetlight/Waterlogging/Other","severity":"Low/Medium/High","description":"one line in English","isValid":true}
-
-If image is NOT a civic issue (selfie, food, animal, indoor photo, nature, random object, person, car, building without damage, etc.) → reply with exactly:
-NOT_CIVIC_ISSUE
-
+If image is NOT a civic issue → reply with exactly: NOT_CIVIC_ISSUE
 Be very strict. When in doubt → NOT_CIVIC_ISSUE`
       ])
-
       const text  = res.response.text().trim()
       const clean = text.replace(/```json|```/g, '').trim()
-
       if (clean === 'NOT_CIVIC_ISSUE' || !clean.startsWith('{')) {
-        setLoading(false)
-        setPreview(null)
-        setPhotoBase64(null)
-        setPhotoError(t('photoErrorMsg'))
-        return
+        setLoading(false); setPreview(null); setPhotoBase64(null)
+        setPhotoError(t('photoErrorMsg')); return
       }
-
       const parsed = JSON.parse(clean)
-      setResult(parsed)
-      setLoading(false)
-      setStep(2)
-
+      setResult(parsed); setLoading(false); setStep(2)
     } catch (err) {
       console.error(err)
-      setLoading(false)
-      setPreview(null)
-      setPhotoBase64(null)
+      setLoading(false); setPreview(null); setPhotoBase64(null)
       setPhotoError(t('photoErrorMsg'))
     }
   }
@@ -208,38 +205,23 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
     setSaving(true)
     const cid = generateComplaintId()
     setComplaintId(cid)
-
     try {
       await addDoc(collection(db, 'complaints'), {
-        complaintId:   cid,
-        userId:        user.id,
-        userFirstName: user.firstName,
-        userLastName:  user.lastName,
-        userMobile:    user.mobile,
-        userEmail:     user.email,
-        issueType:     result.issueType,
-        severity:      result.severity,
-        description:   result.description,
-        addressDetail: addressInput.trim(),
-        ward:          location.ward.ward,
-        wardName:      location.ward.name,
-        lat:           location.lat,
-        lng:           location.lng,
-        createdAt:     new Date().toISOString(),
-        status:        'Pending',
-        beforePhoto:   photoBase64 || null,
-        afterPhoto:    null,
-        supportCount:  0,
-        supporters:    [],
+        complaintId: cid, userId: user.id,
+        userFirstName: user.firstName, userLastName: user.lastName,
+        userMobile: user.mobile, userEmail: user.email,
+        issueType: result.issueType, severity: result.severity,
+        description: result.description, addressDetail: addressInput.trim(),
+        ward: location.ward.ward, wardName: location.ward.name,
+        lat: location.lat, lng: location.lng,
+        createdAt: new Date().toISOString(), status: 'Pending',
+        beforePhoto: photoBase64 || null, afterPhoto: null,
+        supportCount: 0, supporters: [],
       })
       loadComplaints(user.id)
-    } catch (e) {
-      console.error('Firestore save error:', e)
-    }
-
+    } catch (e) { console.error('Firestore save error:', e) }
     setResult(r => ({ ...r, addressDetail: addressInput.trim() }))
-    setSaving(false)
-    setStep(3)
+    setSaving(false); setStep(3)
   }
 
   if (!user) return <Signup onComplete={(u) => setUser(u)} />
@@ -259,10 +241,13 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         .sd { width: 6px; height: 6px; border-radius: 3px; background: #222; transition: all 0.3s; }
         .sd.active { width: 18px; background: #FF6B00; }
         .sd.done { background: #34C759; }
-        .user-chip { background: #1A1A1A; border: 1px solid #242424; border-radius: 100px; padding: 5px 12px 5px 6px; display: flex; align-items: center; gap: 8px; cursor: pointer; transition: border-color 0.2s; }
+        .user-chip { background: #1A1A1A; border: 1px solid #242424; border-radius: 100px; padding: 5px 12px 5px 6px; display: flex; align-items: center; gap: 6px; cursor: pointer; transition: border-color 0.2s; }
         .user-chip:hover { border-color: #FF6B00; }
+        .user-chip.trusted-chip { border-color: #34C75940; }
+        .user-chip.trusted-chip:hover { border-color: #34C759; }
         .user-av { width: 26px; height: 26px; background: #FF6B00; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; }
         .user-nm { font-size: 13px; font-weight: 600; color: #bbb; }
+        .trusted-chip-badge { font-size: 10px; background: #34C75918; color: #34C759; border: 1px solid #34C75935; border-radius: 6px; padding: 2px 6px; font-weight: 700; white-space: nowrap; }
         .welcome { margin: 10px 20px 4px; padding: 9px 14px; background: #FF6B000D; border: 1px solid #FF6B0025; border-radius: 10px; font-size: 13px; color: #FF6B00; }
         .loc-bar { margin: 10px 20px; background: #1A1A1A; border: 1px solid #222; border-radius: 12px; padding: 11px 15px; display: flex; align-items: center; gap: 8px; }
         .loc-dot { width: 8px; height: 8px; border-radius: 50%; background: #34C759; animation: pulse 2s infinite; flex-shrink: 0; }
@@ -320,11 +305,18 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         .action-btn:disabled { opacity: 0.55; cursor: not-allowed; }
         .profile-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.82); z-index: 999; display: flex; align-items: flex-end; }
         .profile-sheet { background: #0F0F0F; border-radius: 28px 28px 0 0; padding: 24px 20px 44px; width: 100%; max-height: 88vh; overflow-y: auto; }
-        .profile-hdr { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+        .profile-hdr { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 20px; }
         .profile-av { width: 50px; height: 50px; background: #FF6B00; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 21px; font-weight: 800; flex-shrink: 0; }
         .profile-name { font-family: 'Syne', sans-serif; font-size: 19px; font-weight: 800; }
         .profile-meta { font-size: 12px; color: #444; margin-top: 3px; }
         .profile-count { font-size: 12px; color: #FF6B00; margin-top: 4px; font-weight: 600; }
+        .trusted-badge-block { margin-top: 8px; background: #34C75912; border: 1px solid #34C75935; border-radius: 12px; padding: 10px 14px; }
+        .trusted-badge-title { font-size: 13px; font-weight: 700; color: #34C759; display: flex; align-items: center; gap: 6px; }
+        .trusted-badge-sub { font-size: 11px; color: #34C75990; margin-top: 3px; }
+        .trusted-badge-progress { margin-top: 8px; }
+        .trusted-badge-bar { height: 4px; border-radius: 2px; background: #1E1E1E; overflow: hidden; }
+        .trusted-badge-fill { height: 100%; border-radius: 2px; background: #34C759; transition: width 0.4s; }
+        .trusted-badge-hint { font-size: 10px; color: #444; margin-top: 4px; }
         .profile-close { margin-left: auto; background: #1A1A1A; border: none; color: #666; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .c-card { background: #161616; border: 1px solid #1E1E1E; border-radius: 16px; padding: 14px 15px; margin-bottom: 10px; }
         .c-card-hdr { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
@@ -352,10 +344,12 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
               <div className={`sd ${step >= 2 ? (step > 2 ? 'done' : 'active') : ''}`} />
               <div className={`sd ${step >= 3 ? 'active' : ''}`} />
             </div>
-            <LangToggle />                          {/* ← ADDED */}
-            <div className="user-chip" onClick={openProfile}>
+            <LangToggle />
+            {/* User chip — shows Trusted badge if earned */}
+            <div className={`user-chip ${trusted ? 'trusted-chip' : ''}`} onClick={openProfile}>
               <div className="user-av">{user.firstName[0]}</div>
               <div className="user-nm">{user.firstName}</div>
+              {trusted && <span className="trusted-chip-badge">✓ Trusted</span>}
             </div>
           </div>
         </div>
@@ -469,9 +463,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
                 <div style={{ fontSize: 16, fontWeight: 800, color: '#FF9500', marginBottom: 6 }}>
                   {t('duplicateTitle', location.ward.ward)}
                 </div>
-                <div style={{ fontSize: 13, color: '#bbb', marginBottom: 10 }}>
-                  {t('duplicateSub')}
-                </div>
+                <div style={{ fontSize: 13, color: '#bbb', marginBottom: 10 }}>{t('duplicateSub')}</div>
                 <div style={{ fontSize: 12, color: '#FF9500', fontFamily: 'monospace', marginBottom: 14 }}>
                   {t('complaintId')}: {existingComplaint.complaintId}
                 </div>
@@ -492,14 +484,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         )}
 
         {step === 3 && result && location && complaintId && (
-          <Step3
-            result={result}
-            location={location}
-            preview={preview}
-            photoDataUrl={photoBase64}
-            user={user}
-            complaintId={complaintId}
-          />
+          <Step3 result={result} location={location} preview={preview} photoDataUrl={photoBase64} user={user} complaintId={complaintId} />
         )}
       </div>
 
@@ -508,10 +493,32 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
           <div className="profile-sheet" onClick={e => e.stopPropagation()}>
             <div className="profile-hdr">
               <div className="profile-av">{user.firstName[0]}</div>
-              <div>
+              <div style={{ flex: 1 }}>
                 <div className="profile-name">{user.firstName} {user.lastName}</div>
                 <div className="profile-meta">{user.mobile} • {user.email}</div>
                 <div className="profile-count">{t('complaints', complaints.length)}</div>
+
+                {/* ── Trusted Nagrik Badge Block ── */}
+                <div className="trusted-badge-block">
+                  {trusted ? (
+                    <>
+                      <div className="trusted-badge-title">✅ Trusted Nagrik</div>
+                      <div className="trusted-badge-sub">{resolvedCount} complaints resolved by BMC</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="trusted-badge-title" style={{ color: '#888' }}>⬜ Trusted Nagrik</div>
+                      <div className="trusted-badge-progress">
+                        <div className="trusted-badge-bar">
+                          <div className="trusted-badge-fill" style={{ width: `${(resolvedCount / TRUSTED_THRESHOLD) * 100}%` }} />
+                        </div>
+                        <div className="trusted-badge-hint">
+                          {resolvedCount}/{TRUSTED_THRESHOLD} complaints resolved — {remaining} more needed
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
               <button className="profile-close" onClick={() => setShowProfile(false)}>✕</button>
             </div>
