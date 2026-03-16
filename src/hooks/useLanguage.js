@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { translations } from '../data/translations'
 
-// Global language state — shared across all components
-let globalLang = localStorage.getItem('nagrik_lang') || 'en'
+// Default language: hin (Hinglish) — existing app strings
+let globalLang = localStorage.getItem('nagrik_lang') || 'hin'
 const listeners = new Set()
 
 export const setGlobalLang = (lang) => {
@@ -21,7 +21,7 @@ export const useLanguage = () => {
   }, [])
 
   const t = (key, ...args) => {
-    const val = translations[lang]?.[key] ?? translations['en']?.[key] ?? key
+    const val = translations[lang]?.[key] ?? translations['hin']?.[key] ?? key
     return typeof val === 'function' ? val(...args) : val
   }
 

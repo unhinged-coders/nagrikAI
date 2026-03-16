@@ -21,13 +21,13 @@ export default function LangToggle() {
             padding: '5px 9px',
             border: 'none',
             cursor: 'pointer',
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: 700,
             fontFamily: "'DM Sans', sans-serif",
             background: lang === l.code ? '#FF6B00' : 'transparent',
             color: lang === l.code ? '#fff' : '#555',
             transition: 'all 0.2s',
-            minWidth: 28,
+            minWidth: 32,
           }}
         >
           {l.label}
