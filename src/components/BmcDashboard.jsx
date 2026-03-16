@@ -4,22 +4,44 @@ import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/fire
 import BmcLogin from './BmcLogin'
 
 const severityColor = (s) => s === 'High' ? '#FF3B30' : s === 'Medium' ? '#FF9500' : '#34C759'
-const severityBg = (s) => s === 'High' ? '#FF3B3018' : s === 'Medium' ? '#FF950018' : '#34C75918'
-const issueIcon = (t) => ({ Pothole: '🕳️', Garbage: '🗑️', 'Broken Streetlight': '💡', Waterlogging: '🌊' }[t] || '⚠️')
+const severityBg   = (s) => s === 'High' ? '#FF3B3018' : s === 'Medium' ? '#FF950018' : '#34C75918'
+const issueIcon    = (t) => ({ Pothole: '🕳️', Garbage: '🗑️', 'Broken Streetlight': '💡', Waterlogging: '🌊' }[t] || '⚠️')
 
 const STATUS_OPTIONS = ['Reported', 'Acknowledged', 'In Progress', 'Resolved']
 
+// Same compression as citizen side — 800px max, JPEG 0.6
+const compressImage = (file) =>
+  new Promise((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      const MAX = 800
+      let { width, height } = img
+      if (width > MAX || height > MAX) {
+        if (width > height) { height = Math.round(height * MAX / width); width = MAX }
+        else                { width  = Math.round(width  * MAX / height); height = MAX }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width; canvas.height = height
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+      URL.revokeObjectURL(url)
+      resolve(canvas.toDataURL('image/jpeg', 0.6))
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null) }
+    img.src = url
+  })
+
 export default function BmcDashboard() {
-  const [officer, setOfficer] = useState(null)
-  const [complaints, setComplaints] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [officer, setOfficer]                   = useState(null)
+  const [complaints, setComplaints]             = useState([])
+  const [loading, setLoading]                   = useState(false)
   const [selectedComplaint, setSelectedComplaint] = useState(null)
-  const [newStatus, setNewStatus] = useState('')
-  const [afterPhotoFile, setAfterPhotoFile] = useState(null)
+  const [newStatus, setNewStatus]               = useState('')
+  const [afterPhotoFile, setAfterPhotoFile]     = useState(null)
   const [afterPhotoPreview, setAfterPhotoPreview] = useState(null)
-  const [updating, setUpdating] = useState(false)
-  const [updateSuccess, setUpdateSuccess] = useState(false)
-  const [filterStatus, setFilterStatus] = useState('All')
+  const [updating, setUpdating]                 = useState(false)
+  const [updateSuccess, setUpdateSuccess]       = useState(false)
+  const [filterStatus, setFilterStatus]         = useState('All')
 
   useEffect(() => {
     const saved = localStorage.getItem('bmc_officer')
@@ -33,12 +55,11 @@ export default function BmcDashboard() {
   const loadComplaints = async () => {
     setLoading(true)
     try {
-      const q = query(
-  collection(db, 'complaints'),
-  where('ward', '==', officer.ward)
-)
+      const q = query(collection(db, 'complaints'), where('ward', '==', officer.ward))
       const snap = await getDocs(q)
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) .filter(c => c.status !== 'Pending') 
+      const list = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(c => c.status !== 'Pending')
       list.sort((a, b) => {
         const sevOrder = { High: 0, Medium: 1, Low: 2 }
         if (sevOrder[a.severity] !== sevOrder[b.severity]) return sevOrder[a.severity] - sevOrder[b.severity]
@@ -60,22 +81,18 @@ export default function BmcDashboard() {
     if (!selectedComplaint || !newStatus) return
     setUpdating(true)
     setUpdateSuccess(false)
-
     try {
       let afterPhotoBase64 = selectedComplaint.afterPhoto || null
 
       if (afterPhotoFile) {
-        const reader = new FileReader()
-        afterPhotoBase64 = await new Promise((resolve) => {
-          reader.onload = () => resolve(reader.result)
-          reader.readAsDataURL(afterPhotoFile)
-        })
+        // Compress before saving — same as citizen side
+        afterPhotoBase64 = await compressImage(afterPhotoFile)
       }
 
       await updateDoc(doc(db, 'complaints', selectedComplaint.id), {
-        status: newStatus,
+        status:     newStatus,
         afterPhoto: afterPhotoBase64,
-        updatedAt: new Date().toISOString(),
+        updatedAt:  new Date().toISOString(),
         ...(newStatus === 'Resolved' ? { resolvedAt: new Date().toISOString() } : {})
       })
 
@@ -90,9 +107,7 @@ export default function BmcDashboard() {
       setAfterPhotoFile(null)
       setAfterPhotoPreview(null)
       setNewStatus('')
-    } catch (e) {
-      console.error(e)
-    }
+    } catch (e) { console.error(e) }
     setUpdating(false)
   }
 
@@ -164,16 +179,12 @@ export default function BmcDashboard() {
 
       <div className="bd-wrap">
         <div className="bd-hdr">
-          <div>
-            <div className="bd-logo">Nagrik<span>AI</span> BMC</div>
-          </div>
+          <div className="bd-logo">Nagrik<span>AI</span> BMC</div>
           <div className="bd-ward-badge">Ward {officer.ward}</div>
           <button className="bd-logout" onClick={logout}>Logout</button>
         </div>
 
         <div className="bd-body">
-
-          {/* Stats */}
           <div className="bd-stats">
             <div className="bd-stat">
               <div className="bd-stat-num">{complaints.length}</div>
@@ -193,7 +204,6 @@ export default function BmcDashboard() {
             </div>
           </div>
 
-          {/* Filter */}
           <div className="bd-filter">
             {['All', 'Reported', 'Acknowledged', 'In Progress', 'Resolved'].map(s => (
               <button key={s} className={`bd-filter-btn ${filterStatus === s ? 'active' : ''}`} onClick={() => setFilterStatus(s)}>
@@ -202,10 +212,7 @@ export default function BmcDashboard() {
             ))}
           </div>
 
-          {updateSuccess && (
-            <div className="bd-success">✅ Complaint updated successfully!</div>
-          )}
-
+          {updateSuccess && <div className="bd-success">✅ Complaint updated successfully!</div>}
           {loading && <div className="bd-spin" />}
 
           {!loading && filtered.length === 0 && (
@@ -216,7 +223,12 @@ export default function BmcDashboard() {
           )}
 
           {!loading && filtered.map(c => (
-            <div className="bd-card" key={c.id} onClick={() => { setSelectedComplaint(c); setNewStatus(c.status); setAfterPhotoPreview(c.afterPhoto || null) }}>
+            <div className="bd-card" key={c.id} onClick={() => {
+              setSelectedComplaint(c)
+              setNewStatus(c.status)
+              setAfterPhotoPreview(c.afterPhoto || null)
+              setUpdateSuccess(false)
+            }}>
               <div className="bd-card-hdr">
                 <div className="bd-card-ico">{issueIcon(c.issueType)}</div>
                 <div className="bd-card-type">{c.issueType}</div>
@@ -226,7 +238,11 @@ export default function BmcDashboard() {
               {c.addressDetail && <div className="bd-card-addr">📍 {c.addressDetail}</div>}
               <div className="bd-card-desc">{c.description}</div>
               <div className="bd-card-meta">
-                <span className="bd-status-pill" style={{ background: c.status === 'Resolved' ? '#0D2E1A' : '#FF6B0015', color: c.status === 'Resolved' ? '#34C759' : '#FF6B00', border: `1px solid ${c.status === 'Resolved' ? '#34C75930' : '#FF6B0030'}` }}>
+                <span className="bd-status-pill" style={{
+                  background: c.status === 'Resolved' ? '#0D2E1A' : '#FF6B0015',
+                  color: c.status === 'Resolved' ? '#34C759' : '#FF6B00',
+                  border: `1px solid ${c.status === 'Resolved' ? '#34C75930' : '#FF6B0030'}`
+                }}>
                   {c.status}
                 </span>
                 <span className="bd-support">🤝 {c.supportCount || 0} support</span>
@@ -262,7 +278,8 @@ export default function BmcDashboard() {
             {afterPhotoPreview ? (
               <>
                 <img src={afterPhotoPreview} className="bd-photo-preview" alt="After preview" />
-                <button style={{ background: 'transparent', border: '1px solid #2A2A2A', color: '#555', borderRadius: 10, padding: '6px 14px', cursor: 'pointer', fontFamily: 'DM Sans', fontSize: 12, marginBottom: 14, display: 'block' }} onClick={() => { setAfterPhotoFile(null); setAfterPhotoPreview(null) }}>
+                <button style={{ background: 'transparent', border: '1px solid #2A2A2A', color: '#555', borderRadius: 10, padding: '6px 14px', cursor: 'pointer', fontFamily: 'DM Sans', fontSize: 12, marginBottom: 14, display: 'block' }}
+                  onClick={() => { setAfterPhotoFile(null); setAfterPhotoPreview(null) }}>
                   ✕ Remove Photo
                 </button>
               </>
