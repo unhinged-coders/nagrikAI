@@ -216,29 +216,25 @@ NagrikAI Platform`
     setEmailError('')
     try {
       await emailjs.send(
-        import.meta.env.VITE_EMAILJS_SERVICE_ID,
-        import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
-        {
-          to_email: location.ward.wardOfficeEmail,
-          officer_name: location.ward.wardOfficerName,
-          complaint_id: complaintId,
-          issue_type: result.issueType,
-          severity: result.severity,
-          ward: location.ward.ward,
-          ward_name: location.ward.name,
-          address_detail: result.addressDetail || 'Not specified',
-          gps: `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`,
-          description: result.description,
-          date_time: new Date().toLocaleString('en-IN'),
-          user_name: `${user.firstName} ${user.lastName}`,
-          user_mobile: user.mobile,
-          user_email: user.email,
-          tracking_url: trackingUrl,
-          email_body: editableEmailBody,
-          photo_base64: photoBase64,
-        },
-        import.meta.env.VITE_EMAILJS_PUBLIC_KEY
-      )
+  import.meta.env.VITE_EMAILJS_SERVICE_ID,
+  import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
+  {
+    to_email: location.ward.wardOfficeEmail,
+    complaint_id: complaintId,
+    issue_type: result.issueType,
+    severity: result.severity,
+    ward: location.ward.ward,
+    ward_name: location.ward.name,
+    address_detail: result.addressDetail || "Not specified",
+    gps: `${location.lat}, ${location.lng}`,
+    description: result.description,
+    user_name: `${user.firstName} ${user.lastName}`,
+    user_mobile: user.mobile,
+    user_email: user.email,
+    tracking_url: trackingUrl
+  },
+  import.meta.env.VITE_EMAILJS_PUBLIC_KEY
+)
       setEmailSent(true)
       setShowEmailPreview(false)
     } catch (err) {
