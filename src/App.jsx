@@ -146,7 +146,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         lat:           location.lat,
         lng:           location.lng,
         createdAt:     new Date().toISOString(),
-        status:        'Reported'
+        status:        'Pending'
       })
     } catch (e) { console.error('Firestore save error:', e) }
 
