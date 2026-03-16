@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { collection, query, where, getDocs, doc, updateDoc, arrayUnion } from 'firebase/firestore'
+import { collection, query, where, getDocs } from 'firebase/firestore'
 import { db } from '../firebase'
 
 const severityColor = (s) => s === 'High' ? '#FF3B30' : s === 'Medium' ? '#FF9500' : '#34C759'
@@ -23,11 +23,6 @@ export default function ComplaintPage() {
   const [loading, setLoading]           = useState(true)
   const [notFound, setNotFound]         = useState(false)
   const [linkCopied, setLinkCopied]     = useState(false)
-  const [canSupport, setCanSupport]     = useState(false)
-  const [alreadySupported, setAlreadySupported] = useState(false)
-  const [supporting, setSupporting]     = useState(false)
-
-  const currentUser = JSON.parse(localStorage.getItem('nagrik_user') || 'null')
 
   useEffect(() => {
     const fetchComplaint = async () => {
@@ -37,23 +32,6 @@ export default function ComplaintPage() {
         if (snap.empty) { setNotFound(true); setLoading(false); return }
         const data = { id: snap.docs[0].id, ...snap.docs[0].data() }
         setComplaint(data)
-
-        // Support check
-        if (currentUser) {
-          const alreadyDone = (data.supporters || []).includes(currentUser.id)
-          setAlreadySupported(alreadyDone)
-
-          if (!alreadyDone && data.userId !== currentUser.id) {
-            const q2 = query(
-              collection(db, 'complaints'),
-              where('userId', '==', currentUser.id),
-              where('ward', '==', data.ward),
-              where('issueType', '==', data.issueType)
-            )
-            const snap2 = await getDocs(q2)
-            if (!snap2.empty) setCanSupport(true)
-          }
-        }
       } catch (e) {
         console.error(e)
         setNotFound(true)
@@ -62,21 +40,6 @@ export default function ComplaintPage() {
     }
     fetchComplaint()
   }, [id])
-
-  const handleSupport = async () => {
-    if (!currentUser || alreadySupported || !complaint) return
-    setSupporting(true)
-    try {
-      await updateDoc(doc(db, 'complaints', complaint.id), {
-        supportCount: (complaint.supportCount || 0) + 1,
-        supporters: arrayUnion(currentUser.id)
-      })
-      setComplaint(c => ({ ...c, supportCount: (c.supportCount || 0) + 1 }))
-      setAlreadySupported(true)
-      setCanSupport(false)
-    } catch (e) { console.error(e) }
-    setSupporting(false)
-  }
 
   const currentStep = complaint ? STATUS_STEPS.indexOf(complaint.status) : 0
 
@@ -221,26 +184,6 @@ export default function ComplaintPage() {
                 <div className="cp-support-count">{complaint.supportCount || 0}</div>
                 <div className="cp-support-label">citizens ne support kiya</div>
               </div>
-              {!currentUser && (
-                <div style={{ fontSize: 12, color: '#555', textAlign: 'right' }}>
-                  App se login karo<br />support karne ke liye
-                </div>
-              )}
-              {currentUser && alreadySupported && (
-                <button className="cp-support-btn" style={{ background: '#0D2E1A', color: '#34C759', border: '1px solid #34C75930' }} disabled>
-                  ✅ Supported
-                </button>
-              )}
-              {currentUser && canSupport && !alreadySupported && (
-                <button className="cp-support-btn" style={{ background: '#FF6B00', color: '#fff' }} onClick={handleSupport} disabled={supporting}>
-                  {supporting ? '...' : '🤝 Support Karo'}
-                </button>
-              )}
-              {currentUser && !canSupport && !alreadySupported && complaint.userId !== currentUser.id && (
-                <div style={{ fontSize: 11, color: '#3A3A3A', textAlign: 'right', maxWidth: 120 }}>
-                  Same area mein same issue report karo tab support kar sakte ho
-                </div>
-              )}
             </div>
 
             {/* Before / After */}

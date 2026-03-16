@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import { collection, addDoc, query, where, getDocs } from 'firebase/firestore'
+import { collection, addDoc, query, where, getDocs, doc, updateDoc, arrayUnion } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from './firebase'
 import MapView from './components/MapView'
@@ -29,6 +29,9 @@ export default function App() {
   const [complaints, setComplaints]               = useState([])
   const [loadingComplaints, setLoadingComplaints] = useState(false)
   const [photoError, setPhotoError]               = useState('')
+  const [existingComplaint, setExistingComplaint] = useState(null)
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false)
+  const [supported, setSupported]                 = useState(false)
 
   useEffect(() => {
     const saved = localStorage.getItem('nagrik_user')
@@ -49,10 +52,15 @@ export default function App() {
     const onRestart = () => {
       setStep(1); setResult(null); setPreview(null)
       setAddressInput(''); setComplaintId(null); setPhotoError('')
+      setExistingComplaint(null); setCheckingDuplicate(false); setSupported(false)
     }
     window.addEventListener('restartApp', onRestart)
     return () => window.removeEventListener('restartApp', onRestart)
   }, [])
+
+  useEffect(() => {
+    if (step === 2 && result && location) checkDuplicate()
+  }, [step])
 
   const loadComplaints = async (uid) => {
     setLoadingComplaints(true)
@@ -70,6 +78,36 @@ export default function App() {
   const openProfile = () => {
     if (user?.id) loadComplaints(user.id)
     setShowProfile(true)
+  }
+
+  const checkDuplicate = async () => {
+    setCheckingDuplicate(true)
+    try {
+      const q = query(
+        collection(db, 'complaints'),
+        where('ward', '==', location.ward.ward),
+        where('issueType', '==', result.issueType)
+      )
+      const snap = await getDocs(q)
+      const active = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(c => c.status !== 'Resolved' && c.userId !== user.id)
+      if (active.length > 0) setExistingComplaint(active[0])
+    } catch (e) { console.error(e) }
+    setCheckingDuplicate(false)
+  }
+
+  const supportExisting = async () => {
+    if (!existingComplaint) return
+    setSaving(true)
+    try {
+      await updateDoc(doc(db, 'complaints', existingComplaint.id), {
+        supportCount: (existingComplaint.supportCount || 0) + 1,
+        supporters: arrayUnion(user.id)
+      })
+      setSupported(true)
+    } catch (e) { console.error(e) }
+    setSaving(false)
   }
 
   const handlePhoto = async (e) => {
@@ -364,9 +402,53 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
               <MapView location={location} result={result} />
             </div>
 
-            <button className="action-btn" onClick={handleProceed} disabled={saving}>
-              {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} /> Saving...</> : '📱 Instagram Story Banao →'}
-            </button>
+            {checkingDuplicate ? (
+              <div style={{ textAlign: 'center', paddingTop: 8 }}>
+                <div className="ai-loading" style={{ width: '100%', justifyContent: 'center', borderRadius: 16, padding: 15 }}>
+                  <div className="spin" />
+                  <span className="ai-txt">Checking for existing complaints...</span>
+                </div>
+              </div>
+            ) : supported && existingComplaint ? (
+              <div style={{ background: '#34C75918', border: '1px solid #34C75935', borderRadius: 16, padding: 16 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#34C759', lineHeight: 1.6 }}>
+                  ✅ You supported complaint {existingComplaint.complaintId} — Track it at /complaint/{existingComplaint.complaintId}
+                </div>
+                <button
+                  className="action-btn"
+                  style={{ marginTop: 12, background: '#34C759' }}
+                  onClick={() => window.open(`${window.location.origin}/complaint/${existingComplaint.complaintId}`, '_blank')}
+                >
+                  🔗 Open Tracking Link
+                </button>
+              </div>
+            ) : existingComplaint && !supported ? (
+              <div style={{ background: '#FF950018', border: '1px solid #FF950035', borderRadius: 16, padding: 16 }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#FF9500', marginBottom: 6 }}>
+                  ⚠️ Same issue already reported in Ward {location.ward.ward}!
+                </div>
+                <div style={{ fontSize: 13, color: '#bbb', marginBottom: 10 }}>
+                  Support this complaint instead of creating a duplicate
+                </div>
+                <div style={{ fontSize: 12, color: '#FF9500', fontFamily: 'monospace', marginBottom: 14 }}>
+                  Complaint ID: {existingComplaint.complaintId}
+                </div>
+                <button className="action-btn" onClick={supportExisting} disabled={saving}>
+                  {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} /> Saving...</> : '🤝 Support This Complaint'}
+                </button>
+                <button
+                  className="action-btn"
+                  style={{ marginTop: 10, background: 'transparent', color: '#FF9500', border: '1px solid #FF950035' }}
+                  onClick={() => setExistingComplaint(null)}
+                >
+                  Different location? Submit anyway
+                </button>
+              </div>
+            ) : (
+              <button className="action-btn" onClick={handleProceed} disabled={saving}>
+                {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} /> Saving...</> : '📱 Instagram Story Banao →'}
+              </button>
+            )}
           </div>
         )}
 
