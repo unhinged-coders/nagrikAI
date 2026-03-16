@@ -36,8 +36,20 @@ export default function App() {
   useEffect(() => {
     const saved = localStorage.getItem('nagrik_user')
     if (saved) {
-      const parsed = JSON.parse(saved)
-      setUser(parsed)
+      try {
+        const parsed = JSON.parse(saved)
+        // Validate that user has required id field
+        if (parsed && parsed.id) {
+          setUser(parsed)
+        } else {
+          // Invalid user data - clear localStorage and show signup
+          localStorage.removeItem('nagrik_user')
+          console.warn('Invalid user data in localStorage - cleared')
+        }
+      } catch (e) {
+        console.error('Failed to parse localStorage user:', e)
+        localStorage.removeItem('nagrik_user')
+      }
     }
 
     navigator.geolocation.watchPosition(
