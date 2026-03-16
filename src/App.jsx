@@ -35,7 +35,11 @@ export default function App() {
 
   useEffect(() => {
     const saved = localStorage.getItem('nagrik_user')
-    if (saved) setUser(JSON.parse(saved))
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      console.log('Loaded user from localStorage:', parsed)
+      setUser(parsed)
+    }
 
     navigator.geolocation.watchPosition(
       (pos) => {
@@ -65,18 +69,17 @@ export default function App() {
   const loadComplaints = async (uid) => {
     setLoadingComplaints(true)
     try {
-      console.log('Loading complaints for userId:', uid)
       const q = query(collection(db, 'complaints'), where('userId', '==', uid))
       const snap = await getDocs(q)
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
       list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       setComplaints(list)
-    } catch (e) { console.error(e) }
+    } catch (e) { console.error('loadComplaints error:', e) }
     setLoadingComplaints(false)
   }
 
   const openProfile = () => {
-    if (user?.id) loadComplaints(user.id)
+    if (user) loadComplaints(user.id)
     setShowProfile(true)
   }
 
