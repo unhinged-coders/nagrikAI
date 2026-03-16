@@ -219,7 +219,7 @@ NagrikAI Platform`
         import.meta.env.VITE_EMAILJS_SERVICE_ID,
         import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
         {
-          to_email: 'sahilkade2@gmail.com',
+          to_email: location.ward.wardOfficeEmail,
           officer_name: location.ward.wardOfficerName,
           complaint_id: complaintId,
           issue_type: result.issueType,
