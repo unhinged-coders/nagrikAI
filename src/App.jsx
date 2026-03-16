@@ -57,6 +57,7 @@ export default function App() {
   const loadComplaints = async (uid) => {
     setLoadingComplaints(true)
     try {
+      console.log('Loading complaints for userId:', uid)
       const q = query(collection(db, 'complaints'), where('userId', '==', uid))
       const snap = await getDocs(q)
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
@@ -67,7 +68,7 @@ export default function App() {
   }
 
   const openProfile = () => {
-    if (user) loadComplaints(user.id)
+    if (user?.id) loadComplaints(user.id)
     setShowProfile(true)
   }
 
@@ -388,6 +389,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
             </div>
 
             <div className="sec-label">Meri Complaints</div>
+            <div className="profile-meta">Debug: {complaints.length} complaint{complaints.length !== 1 ? 's' : ''} found for user ID {user.id}</div>
 
             {loadingComplaints && (
               <div style={{ textAlign: 'center', padding: '32px 0', color: '#333' }}>

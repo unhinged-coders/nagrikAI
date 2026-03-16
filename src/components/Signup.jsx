@@ -23,7 +23,7 @@ export default function Signup({ onComplete }) {
         points: 0,
       })
       const userData = { ...form, id: docRef.id }
-      localStorage.setItem('nagrik_user', JSON.stringify(userData))
+      localStorage.setItem('nagrik_user', JSON.stringify({ ...form, id: docRef.id }))
       onComplete(userData)
     } catch (e) {
       setError('Error saving data. Try again!')
