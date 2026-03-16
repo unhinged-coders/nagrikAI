@@ -62,10 +62,9 @@ export default function App() {
   const [supported, setSupported]                 = useState(false)
   const [photoBase64, setPhotoBase64]             = useState(null)
 
-  const trusted = isTrusted(user?.resolvedCount)
-  const resolvedCount = user?.resolvedCount || 0
-  const remaining = TRUSTED_THRESHOLD - resolvedCount
-
+  const resolvedCount = complaints.filter(c => c.status === 'Resolved').length
+const trusted = resolvedCount >= TRUSTED_THRESHOLD
+const remaining = Math.max(0, TRUSTED_THRESHOLD - resolvedCount)
   useEffect(() => {
     const saved = localStorage.getItem('nagrik_user')
     if (saved) {
