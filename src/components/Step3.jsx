@@ -136,22 +136,22 @@ NagrikAI Platform`
       ctx.fillStyle = '#ffffff15'; ctx.beginPath()
       ctx.roundRect(60, 172, 520, 52, 10); ctx.fill()
       ctx.fillStyle = '#FF6B00'; ctx.font = 'bold 26px Arial'
-      ctx.fillText(`ID: ${complaintId}`, 75, 206)
+      ctx.fillText(`🔖 ID: ${complaintId}`, 75, 206)
 
       const badgeColor = result.severity === 'High' ? '#FF3B30' : result.severity === 'Medium' ? '#FF9500' : '#34C759'
       ctx.fillStyle = badgeColor; ctx.beginPath()
       ctx.roundRect(60, 242, 520, 88, 44); ctx.fill()
       ctx.fillStyle = '#fff'; ctx.font = 'bold 44px Arial'; ctx.textAlign = 'center'
-      ctx.fillText(`${result.issueType}`, 320, 298)
+      ctx.fillText(`⚠️  ${result.issueType}`, 320, 298)
       ctx.fillStyle = '#ffffff20'; ctx.beginPath()
       ctx.roundRect(600, 242, 260, 88, 44); ctx.fill()
       ctx.fillStyle = badgeColor; ctx.font = 'bold 40px Arial'
-      ctx.fillText(`${result.severity}`, 730, 298)
+      ctx.fillText(`${result.severity} ⚡`, 730, 298)
 
       ctx.fillStyle = '#ffffff'; ctx.font = 'bold 52px Arial'; ctx.textAlign = 'left'
-      ctx.fillText(`${location.ward.name}`, 60, 1500)
+      ctx.fillText(`📍 ${location.ward.name}`, 60, 1500)
       ctx.fillStyle = '#ffcc00'; ctx.font = '38px Arial'
-      ctx.fillText(`BMC Ward ${location.ward.ward} - Mumbai`, 60, 1556)
+      ctx.fillText(`BMC Ward ${location.ward.ward} • Mumbai`, 60, 1556)
       if (result.addressDetail) {
         ctx.fillStyle = '#cccccc'; ctx.font = '32px Arial'
         ctx.fillText(result.addressDetail.substring(0, 46), 60, 1602)
@@ -162,7 +162,7 @@ NagrikAI Platform`
 
       ctx.fillStyle = '#FF6B00'; ctx.fillRect(0, 1860, 1080, 60)
       ctx.fillStyle = '#fff'; ctx.font = 'bold 26px Arial'; ctx.textAlign = 'center'
-      ctx.fillText(`Track: ${window.location.host}/complaint/${complaintId}`, 540, 1898)
+      ctx.fillText(`nagrik-ai.vercel.app/complaint/${complaintId}`, 540, 1898)
 
       setStoryDataUrl(canvas.toDataURL('image/jpeg', 0.95))
       setStoryReady(true)
@@ -202,11 +202,11 @@ NagrikAI Platform`
     }
     setTimeout(() => {
       const text = encodeURIComponent(
-        `Civic Issue Reported - ${location.ward.name}, Mumbai!\n` +
+        `🚨 Civic Issue Reported — ${location.ward.name}, Mumbai!\n` +
         `Issue: ${result.issueType} | Severity: ${result.severity}\n` +
-        (result.addressDetail ? `${result.addressDetail}\n` : '') +
+        (result.addressDetail ? `📍 ${result.addressDetail}\n` : '') +
         `\n${roast}\n\n` +
-        `Track complaint: ${trackingUrl}\n\n` +
+        `Track complaint 👉 ${trackingUrl}\n\n` +
         `@mybmc #FixMumbai #${location.ward.name.replace(/ /g, '')} #NagrikAI`
       )
       window.open(`https://twitter.com/intent/tweet?text=${text}`, '_blank')
@@ -214,51 +214,47 @@ NagrikAI Platform`
   }
 
   const sendEmail = async () => {
-    setEmailSending(true)
-    setEmailError('')
-    try {
-      await emailjs.send(
-        import.meta.env.VITE_EMAILJS_SERVICE_ID,
-        import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
-        {
-          to_email: location.ward.wardOfficeEmail,
-          complaint_id: complaintId,
-          issue_type: result.issueType,
-          severity: result.severity,
-          ward: location.ward.ward,
-          ward_name: location.ward.name,
-          officer_name: location.ward.wardOfficerName,
-          address_detail: result.addressDetail || 'Not specified',
-          gps: `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`,
-          description: result.description,
-          user_name: `${user.firstName} ${user.lastName}`,
-          user_mobile: user.mobile,
-          user_email: user.email,
-          tracking_url: trackingUrl,
-          email_body: editableEmailBody,
-          photo_base64: photoBase64,
-        },
-        import.meta.env.VITE_EMAILJS_PUBLIC_KEY
-      )
+  setEmailSending(true)
+  setEmailError('')
+  try {
+    await emailjs.send(
+      import.meta.env.VITE_EMAILJS_SERVICE_ID,
+      import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
+      {
+        to_email: location.ward.wardOfficeEmail,
+        complaint_id: complaintId,
+        issue_type: result.issueType,
+        severity: result.severity,
+        ward: location.ward.ward,
+        ward_name: location.ward.name,
+        address_detail: result.addressDetail || "Not specified",
+        gps: `${location.lat}, ${location.lng}`,
+        description: result.description,
+        user_name: `${user.firstName} ${user.lastName}`,
+        user_mobile: user.mobile,
+        user_email: user.email,
+        tracking_url: trackingUrl
+      },
+      import.meta.env.VITE_EMAILJS_PUBLIC_KEY
+    )
 
-      // Update Firestore status to Reported after email sent
-      const q = query(collection(db, 'complaints'), where('complaintId', '==', complaintId))
-      const snap = await getDocs(q)
-      if (!snap.empty) {
-        await updateDoc(doc(db, 'complaints', snap.docs[0].id), {
-          status: 'Reported',
-          emailSentAt: new Date().toISOString()
-        })
-      }
-
-      setEmailSent(true)
-      setShowEmailPreview(false)
-    } catch (err) {
-      console.error('EmailJS error:', err)
-      setEmailError('Email send nahi hua — dobara try karo')
+    const q = query(collection(db, 'complaints'), where('complaintId', '==', complaintId))
+    const snap = await getDocs(q)
+    if (!snap.empty) {
+      await updateDoc(doc(db, 'complaints', snap.docs[0].id), {
+        status: 'Reported',
+        emailSentAt: new Date().toISOString()
+      })
     }
-    setEmailSending(false)
+
+    setEmailSent(true)
+    setShowEmailPreview(false)
+  } catch (err) {
+    console.error('EmailJS error:', err)
+    setEmailError('Email send nahi hua — dobara try karo')
   }
+  setEmailSending(false)
+}
 
   return (
     <>
@@ -269,7 +265,7 @@ NagrikAI Platform`
         .s3-id-card { background: #FF6B0012; border: 1px solid #FF6B0035; border-radius: 16px; padding: 14px 16px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
         .s3-id-label { font-size: 10px; color: #FF6B00; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 4px; font-weight: 700; }
         .s3-id-value { font-size: 15px; font-weight: 700; color: #fff; font-family: monospace; letter-spacing: 1px; }
-        .s3-id-url { font-size: 11px; color: #555; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .s3-id-url { font-size: 11px; color: #555; margin-top: 4px; }
         .s3-copy-btn { background: transparent; border: 1px solid #2A2A2A; border-radius: 10px; color: #777; padding: 8px 13px; cursor: pointer; font-size: 12px; font-family: 'DM Sans', sans-serif; font-weight: 600; white-space: nowrap; transition: all 0.2s; }
         .s3-copy-btn:hover { border-color: #FF6B00; color: #FF6B00; }
         .s3-copy-btn.done { border-color: #34C759; color: #34C759; }
