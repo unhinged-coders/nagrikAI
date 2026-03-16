@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { collection, addDoc, query, where, getDocs, doc, updateDoc, arrayUnion } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
@@ -32,22 +32,17 @@ export default function App() {
   const [existingComplaint, setExistingComplaint] = useState(null)
   const [checkingDuplicate, setCheckingDuplicate] = useState(false)
   const [supported, setSupported]                 = useState(false)
-  const [uploadError, setUploadError]             = useState('')
-
-  // ✅ FIX 1: Use a ref instead of state for photoFile
-  // State is async — by the time handleProceed reads photoFile state,
-  // it may be stale if re-renders happen between capture and proceed.
-  // A ref is synchronous and always holds the latest value.
-  const photoFileRef = useRef(null)
-
+  const [photoFile, setPhotoFile]                = useState(null)
   useEffect(() => {
     const saved = localStorage.getItem('nagrik_user')
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
+        // Validate that user has required id field
         if (parsed && parsed.id) {
           setUser(parsed)
         } else {
+          // Invalid user data - clear localStorage and show signup
           localStorage.removeItem('nagrik_user')
           console.warn('Invalid user data in localStorage - cleared')
         }
@@ -70,18 +65,11 @@ export default function App() {
     )
 
     const onRestart = () => {
-      setStep(1)
-      setResult(null)
-      setPreview(null)
-      photoFileRef.current = null   // ✅ clear ref on restart
-      setAddressInput('')
-      setComplaintId(null)
-      setPhotoError('')
-      setUploadError('')
-      setExistingComplaint(null)
-      setCheckingDuplicate(false)
-      setSupported(false)
-    }
+  setStep(1); setResult(null); setPreview(null)
+  setPhotoFile(null)           // ← ADD THIS
+  setAddressInput(''); setComplaintId(null); setPhotoError('')
+  setExistingComplaint(null); setCheckingDuplicate(false); setSupported(false)
+}
     window.addEventListener('restartApp', onRestart)
     return () => window.removeEventListener('restartApp', onRestart)
   }, [])
@@ -137,18 +125,13 @@ export default function App() {
     setSaving(false)
   }
 
-  // ✅ FIX 2: Cleaned up handlePhoto — removed the orphaned comment that
-  // caused confusion about what code was "new" vs "existing". All logic is
-  // now in the correct order with photoFileRef.current set immediately.
   const handlePhoto = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-
-    // Store file in ref immediately — synchronous, never stale
-    photoFileRef.current = file
-    setPreview(URL.createObjectURL(file))
+  const file = e.target.files[0]
+  if (!file) return
+  setPhotoFile(file)           // ← ADD THIS LINE
+  setPreview(URL.createObjectURL(file))
+  // ... rest stays the same
     setPhotoError('')
-    setUploadError('')
     setLoading(true)
 
     const reader = new FileReader()
@@ -158,7 +141,7 @@ export default function App() {
         const base64 = reader.result.split(',')[1]
         const model  = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
         const res    = await model.generateContent([
-          { inlineData: { mimeType: file.type || 'image/jpeg', data: base64 } },
+          { inlineData: { mimeType: 'image/jpeg', data: base64 } },
           `You are a strict Mumbai civic issue detector for BMC.
 Analyze this image carefully.
 
@@ -180,7 +163,6 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         if (clean === 'NOT_CIVIC_ISSUE' || !clean.startsWith('{')) {
           setLoading(false)
           setPreview(null)
-          photoFileRef.current = null
           setPhotoError('Yeh civic issue nahi lagta. Pothole, garbage, broken streetlight ya waterlogging ki clear photo lo.')
           return
         }
@@ -194,91 +176,62 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         console.error(err)
         setLoading(false)
         setPreview(null)
-        photoFileRef.current = null
         setPhotoError('Image analyze nahi ho saki. Dobara try karo.')
       }
     }
   }
 
-  const handleProceed = async () => {
-    setSaving(true)
-    setUploadError('')
-    const cid = generateComplaintId()
-    setComplaintId(cid)
+ const handleProceed = async () => {
+  setSaving(true)
+  const cid = generateComplaintId()
+  setComplaintId(cid)
 
-    let beforePhotoURL = null
+  let beforePhotoURL = null
 
-    // ✅ FIX 3: Read from ref (always current) instead of state (may be stale)
-    const fileToUpload = photoFileRef.current
-
-    if (fileToUpload) {
-      try {
-        // ✅ FIX 4: Use a consistent, clean file extension derived from MIME type
-        // rather than splitting the filename (which may be "image" with no extension
-        // on some Android camera captures)
-        const mimeToExt = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic' }
-        const ext = mimeToExt[fileToUpload.type] || fileToUpload.name.split('.').pop() || 'jpg'
-        const storagePath = `complaints/${cid}/before.${ext}`
-        const storageRef = ref(storage, storagePath)
-
-        console.log(`[Storage] Uploading to: ${storagePath} | size: ${fileToUpload.size} bytes | type: ${fileToUpload.type}`)
-
-        const snapshot = await uploadBytes(storageRef, fileToUpload)
-        beforePhotoURL = await getDownloadURL(snapshot.ref)
-
-        console.log('[Storage] Upload successful:', beforePhotoURL)
-      } catch (e) {
-        // ✅ FIX 5: Surface the upload error to the user instead of silently ignoring
-        console.error('[Storage] Upload failed:', e)
-
-        // Common error codes and user-friendly messages
-        const storageErrorMessages = {
-          'storage/unauthorized': 'Photo upload failed: Storage permission denied. Check Firebase Storage rules.',
-          'storage/canceled': 'Photo upload was cancelled.',
-          'storage/quota-exceeded': 'Storage quota exceeded.',
-          'storage/unauthenticated': 'Not authenticated for storage upload.',
-        }
-        const friendlyMsg = storageErrorMessages[e.code] || `Photo upload failed (${e.code || e.message}). Complaint will be saved without photo.`
-        setUploadError(friendlyMsg)
-
-        // Non-fatal: continue saving complaint without photo
-      }
-    } else {
-      console.warn('[Storage] No file in ref — skipping upload')
-    }
-
+  // Upload photo to Firebase Storage
+  if (photoFile) {
     try {
-      await addDoc(collection(db, 'complaints'), {
-        complaintId: cid,
-        userId: user.id,
-        userFirstName: user.firstName,
-        userLastName: user.lastName,
-        userMobile: user.mobile,
-        userEmail: user.email,
-        issueType: result.issueType,
-        severity: result.severity,
-        description: result.description,
-        addressDetail: addressInput.trim(),
-        ward: location.ward.ward,
-        wardName: location.ward.name,
-        lat: location.lat,
-        lng: location.lng,
-        createdAt: new Date().toISOString(),
-        status: 'Pending',
-        beforePhoto: beforePhotoURL,   // Real URL or null if upload failed
-        afterPhoto: null,
-        supportCount: 0,
-        supporters: [],
-      })
+      const ext = photoFile.name.split('.').pop() || 'jpg'
+      const storageRef = ref(storage, `complaints/${cid}/before.${ext}`)
+      await uploadBytes(storageRef, photoFile)
+      beforePhotoURL = await getDownloadURL(storageRef)
     } catch (e) {
-      console.error('Firestore save error:', e)
+      console.error('Storage upload error:', e)
+      // Non-fatal: continue saving complaint without photo
     }
-
-    setResult(r => ({ ...r, addressDetail: addressInput.trim() }))
-    setSaving(false)
-    setStep(3)
   }
 
+  try {
+    await addDoc(collection(db, 'complaints'), {
+      complaintId: cid,
+      userId: user.id,
+      userFirstName: user.firstName,
+      userLastName: user.lastName,
+      userMobile: user.mobile,
+      userEmail: user.email,
+      issueType: result.issueType,
+      severity: result.severity,
+      description: result.description,
+      addressDetail: addressInput.trim(),
+      ward: location.ward.ward,
+      wardName: location.ward.name,
+      lat: location.lat,
+      lng: location.lng,
+      createdAt: new Date().toISOString(),
+      status: 'Pending',
+      beforePhoto: beforePhotoURL,   // ← Now a real URL or null if upload failed
+      afterPhoto: null,
+      supportCount: 0,
+      supporters: [],
+    })
+  } catch (e) {
+    console.error('Firestore save error:', e)
+  }
+
+  setResult(r => ({ ...r, addressDetail: addressInput.trim() }))
+  setSaving(false)
+  setStep(3)
+}
   if (!user) return <Signup onComplete={(u) => setUser(u)} />
 
   return (
@@ -324,7 +277,6 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         .ai-txt { font-size: 13px; color: #888; }
         .photo-error { margin: 12px 0 0; background: #FF3B3012; border: 1px solid #FF3B3035; color: #FF3B30; padding: 13px 16px; border-radius: 14px; font-size: 14px; line-height: 1.6; text-align: center; }
         .photo-error-icon { font-size: 28px; display: block; margin-bottom: 6px; }
-        .upload-error { margin: 8px 0; background: #FF950012; border: 1px solid #FF950035; color: #FF9500; padding: 10px 14px; border-radius: 12px; font-size: 12px; line-height: 1.6; }
         .result-wrap { padding: 0 20px 24px; }
         .sec-label { font-size: 11px; color: #555; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; font-weight: 600; }
         .issue-card { background: #141414; border-radius: 20px; overflow: hidden; margin-bottom: 12px; border: 1px solid #1E1E1E; }
@@ -484,11 +436,6 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
               <MapView location={location} result={result} />
             </div>
 
-            {/* ✅ FIX 5: Show upload error if photo upload failed but we're still proceeding */}
-            {uploadError && (
-              <div className="upload-error">⚠️ {uploadError}</div>
-            )}
-
             {checkingDuplicate ? (
               <div style={{ textAlign: 'center', paddingTop: 8 }}>
                 <div className="ai-loading" style={{ width: '100%', justifyContent: 'center', borderRadius: 16, padding: 15 }}>
@@ -558,6 +505,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
             </div>
 
             <div className="sec-label">Meri Complaints</div>
+            <div className="profile-meta">Debug: {complaints.length} complaint{complaints.length !== 1 ? 's' : ''} found for user ID {user.id}</div>
 
             {loadingComplaints && (
               <div style={{ textAlign: 'center', padding: '32px 0', color: '#333' }}>
