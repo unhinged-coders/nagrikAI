@@ -105,16 +105,16 @@ export default function App() {
   // ── Auto-sync resolvedCount from Firestore complaints ───────────────────
   // When complaints load, count resolved ones and update user if needed
   const syncResolvedCount = async (uid, list) => {
-    const resolved = list.filter(c => c.status === 'Resolved').length
-    if (resolved !== (user?.resolvedCount || 0)) {
-      try {
-        await updateDoc(doc(db, 'users', uid), { resolvedCount: resolved })
-        const updatedUser = { ...user, resolvedCount: resolved }
-        localStorage.setItem('nagrik_user', JSON.stringify(updatedUser))
-        setUser(updatedUser)
-      } catch (e) { console.error('syncResolvedCount error:', e) }
-    }
-  }
+  const resolved = list.filter(c => c.status === 'Resolved').length
+  try {
+    await updateDoc(doc(db, 'users', uid), { resolvedCount: resolved })
+    const saved = localStorage.getItem('nagrik_user')
+    const current = saved ? JSON.parse(saved) : {}
+    const updatedUser = { ...current, resolvedCount: resolved }
+    localStorage.setItem('nagrik_user', JSON.stringify(updatedUser))
+    setUser(updatedUser)
+  } catch (e) { console.error('syncResolvedCount error:', e) }
+}
 
   const loadComplaints = async (uid) => {
     setLoadingComplaints(true)
