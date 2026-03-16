@@ -9,6 +9,22 @@ const issueIcon    = (t) => ({ Pothole: '🕳️', Garbage: '🗑️', 'Broken S
 
 const STATUS_STEPS = ['Pending', 'Reported', 'Acknowledged', 'In Progress', 'Resolved']
 
+// Normalize status — handles case mismatches and legacy values
+const normalizeStatus = (raw) => {
+  if (!raw) return 'Pending'
+  const map = {
+    'pending':      'Pending',
+    'reported':     'Reported',
+    'acknowledged': 'Acknowledged',
+    'in progress':  'In Progress',
+    'inprogress':   'In Progress',
+    'in_progress':  'In Progress',
+    'resolved':     'Resolved',
+    'registered':   'Reported',   // legacy value → map to Reported
+  }
+  return map[raw.toLowerCase().trim()] || 'Pending'
+}
+
 const statusColor = (s) => ({
   Pending:      '#555555',
   Reported:     '#FF9500',
@@ -19,21 +35,34 @@ const statusColor = (s) => ({
 
 export default function ComplaintPage() {
   const { id } = useParams()
-  const [complaint, setComplaint]       = useState(null)
-  const [loading, setLoading]           = useState(true)
-  const [notFound, setNotFound]         = useState(false)
-  const [linkCopied, setLinkCopied]     = useState(false)
+  const [complaint, setComplaint]   = useState(null)
+  const [loading, setLoading]       = useState(true)
+  const [notFound, setNotFound]     = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
 
   useEffect(() => {
     const fetchComplaint = async () => {
       try {
-        const q    = query(collection(db, 'complaints'), where('complaintId', '==', id))
-        const snap = await getDocs(q)
+        // Try matching by complaintId field first
+        let snap = await getDocs(
+          query(collection(db, 'complaints'), where('complaintId', '==', id))
+        )
+        // Fallback: try Firestore document ID (older complaints)
+        if (snap.empty) {
+          const { doc, getDoc } = await import('firebase/firestore')
+          try {
+            const docSnap = await getDoc(doc(db, 'complaints', id))
+            if (docSnap.exists()) {
+              setComplaint({ id: docSnap.id, ...docSnap.data() })
+              setLoading(false)
+              return
+            }
+          } catch (_) {}
+        }
         if (snap.empty) { setNotFound(true); setLoading(false); return }
-        const data = { id: snap.docs[0].id, ...snap.docs[0].data() }
-        setComplaint(data)
+        setComplaint({ id: snap.docs[0].id, ...snap.docs[0].data() })
       } catch (e) {
-        console.error(e)
+        console.error('fetchComplaint error:', e)
         setNotFound(true)
       }
       setLoading(false)
@@ -41,7 +70,8 @@ export default function ComplaintPage() {
     fetchComplaint()
   }, [id])
 
-  const currentStep = complaint ? STATUS_STEPS.indexOf(complaint.status) : 0
+  const normalStatus = complaint ? normalizeStatus(complaint.status) : 'Pending'
+  const currentStep  = STATUS_STEPS.indexOf(normalStatus)
 
   return (
     <>
@@ -116,7 +146,6 @@ export default function ComplaintPage() {
         .cp-footer { text-align: center; padding: 24px 20px 0; font-size: 11px; color: #2A2A2A; }
         .cp-footer span { color: #FF6B00; }
         .cp-home-btn { margin-top: 16px; padding: 12px 24px; background: #FF6B00; color: #fff; border: none; border-radius: 12px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: 'DM Sans', sans-serif; }
-        .cp-support-btn { border: none; border-radius: 12px; padding: 10px 16px; font-weight: 700; font-size: 13px; cursor: pointer; font-family: 'DM Sans', sans-serif; }
       `}</style>
 
       <div className="cp-wrap">
@@ -146,7 +175,6 @@ export default function ComplaintPage() {
         {!loading && complaint && (
           <div className="cp-body">
 
-            {/* Complaint ID */}
             <div className="cp-id-card">
               <div className="cp-id-top">Complaint ID</div>
               <div className="cp-id-val">{complaint.complaintId}</div>
@@ -155,7 +183,6 @@ export default function ComplaintPage() {
               </div>
             </div>
 
-            {/* Status Tracker */}
             <div className="cp-label">Status Tracker</div>
             <div className="cp-status-card">
               <div className="cp-status-title">Complaint Progress</div>
@@ -172,12 +199,18 @@ export default function ComplaintPage() {
                   </div>
                 ))}
               </div>
-              <div className="cp-current-status" style={{ background: severityBg(complaint.severity), color: statusColor(complaint.status), border: `1px solid ${statusColor(complaint.status)}30` }}>
-                Current Status: {complaint.status}
+              <div
+                className="cp-current-status"
+                style={{
+                  background: `${statusColor(normalStatus)}15`,
+                  color: statusColor(normalStatus),
+                  border: `1px solid ${statusColor(normalStatus)}30`
+                }}
+              >
+                Current Status: {normalStatus}
               </div>
             </div>
 
-            {/* Community Support */}
             <div className="cp-label">Community Support</div>
             <div className="cp-support-card">
               <div>
@@ -186,7 +219,6 @@ export default function ComplaintPage() {
               </div>
             </div>
 
-            {/* Before / After */}
             <div className="cp-label">Before / After</div>
             <div className="cp-before-after">
               <div className="cp-ba-title">Visual Proof</div>
@@ -194,7 +226,12 @@ export default function ComplaintPage() {
                 <div className="cp-ba-side">
                   <div className="cp-ba-label">📸 Before</div>
                   {complaint.beforePhoto ? (
-                    <img src={complaint.beforePhoto} className="cp-ba-img" alt="Before" />
+                    <img
+                      src={complaint.beforePhoto}
+                      className="cp-ba-img"
+                      alt="Before"
+                      onError={e => { e.target.style.display = 'none' }}
+                    />
                   ) : (
                     <div className="cp-ba-empty">
                       <span style={{ fontSize: 24 }}>📸</span>
@@ -206,7 +243,12 @@ export default function ComplaintPage() {
                 <div className="cp-ba-side">
                   <div className="cp-ba-label">✅ After</div>
                   {complaint.afterPhoto ? (
-                    <img src={complaint.afterPhoto} className="cp-ba-img" alt="After" />
+                    <img
+                      src={complaint.afterPhoto}
+                      className="cp-ba-img"
+                      alt="After"
+                      onError={e => { e.target.style.display = 'none' }}
+                    />
                   ) : (
                     <div className="cp-ba-empty">
                       <span style={{ fontSize: 24 }}>⏳</span>
@@ -217,7 +259,6 @@ export default function ComplaintPage() {
               </div>
             </div>
 
-            {/* Issue Details */}
             <div className="cp-label">Issue Details</div>
             <div className="cp-issue-card">
               <div className="cp-issue-hdr">
@@ -241,7 +282,6 @@ export default function ComplaintPage() {
               </div>
             </div>
 
-            {/* Ward Officer */}
             <div className="cp-label">Assigned Officer</div>
             <div className="cp-officer">
               <div className="cp-officer-av">👮</div>
@@ -251,7 +291,6 @@ export default function ComplaintPage() {
               </div>
             </div>
 
-            {/* Reported By — Anonymous */}
             <div className="cp-label">Reported By</div>
             <div className="cp-reporter">
               <div className="cp-reporter-name">👤 Anonymous Citizen</div>

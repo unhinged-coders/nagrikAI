@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { db } from '../firebase'
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore'
+import { collection, addDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore'
 
 export default function Signup({ onComplete }) {
   const [form, setForm] = useState({ firstName: '', lastName: '', mobile: '', email: '' })
@@ -15,17 +15,34 @@ export default function Signup({ onComplete }) {
       setError('Valid 10-digit mobile number daalo!'); return
     }
     setLoading(true)
+    setError('')
     try {
+      // ── Check if user already exists by mobile number ──
+      const snap = await getDocs(
+        query(collection(db, 'users'), where('mobile', '==', form.mobile))
+      )
+
+      let userData
+      if (!snap.empty) {
+        // Returning user — restore from Firestore, don't create duplicate
+        const docSnap = snap.docs[0]
+        userData = { ...docSnap.data(), id: docSnap.id }
+        localStorage.setItem('nagrik_user', JSON.stringify(userData))
+        onComplete(userData)
+        return
+      }
+
+      // ── New user — create Firestore document ──
       const docRef = await addDoc(collection(db, 'users'), {
         ...form,
         createdAt: serverTimestamp(),
         reportsCount: 0,
         points: 0,
       })
-      // Save full user object including id (docRef.id) to localStorage
-      const userData = { ...form, id: docRef.id }
+      userData = { ...form, id: docRef.id }
       localStorage.setItem('nagrik_user', JSON.stringify(userData))
       onComplete(userData)
+
     } catch (e) {
       console.error('Signup error:', e)
       setError('Error saving data. Try again!')
@@ -43,7 +60,8 @@ export default function Signup({ onComplete }) {
         .sg-card { width: 100%; max-width: 400px; background: #141414; border-radius: 28px; padding: 36px 28px; border: 1px solid #1E1E1E; }
         .sg-flag { font-size: 52px; display: block; text-align: center; margin-bottom: 12px; }
         .sg-title { font-family: 'Syne', sans-serif; font-size: 34px; font-weight: 800; color: #FF6B00; text-align: center; }
-        .sg-sub { font-size: 14px; color: #555; text-align: center; margin-top: 6px; margin-bottom: 28px; }
+        .sg-sub { font-size: 14px; color: #555; text-align: center; margin-top: 6px; margin-bottom: 16px; }
+        .sg-hint { font-size: 12px; color: #444; text-align: center; margin-bottom: 20px; line-height: 1.6; padding: 10px 14px; background: #1A1A1A; border-radius: 10px; border: 1px solid #252525; }
         .sg-input { width: 100%; background: #1A1A1A; border: 1.5px solid #252525; border-radius: 14px; padding: 14px 16px; color: #fff; font-size: 15px; font-family: 'DM Sans', sans-serif; outline: none; transition: border-color 0.2s; margin-bottom: 12px; display: block; }
         .sg-input:focus { border-color: #FF6B00; }
         .sg-input::placeholder { color: #333; }
@@ -58,6 +76,9 @@ export default function Signup({ onComplete }) {
           <span className="sg-flag">🇮🇳</span>
           <div className="sg-title">NagrikAI</div>
           <div className="sg-sub">Mumbai ki awaaz, AI ki taakat</div>
+          <div className="sg-hint">
+            💡 Pehle se account hai? Wohi mobile number daalo — tumhara purana data wapas aa jayega
+          </div>
           <input
             className="sg-input"
             placeholder="First Name *"
@@ -86,7 +107,7 @@ export default function Signup({ onComplete }) {
           />
           {error && <div className="sg-error">{error}</div>}
           <button className="sg-btn" onClick={handleSubmit} disabled={loading}>
-            {loading ? 'Saving...' : 'Get Started 🚀'}
+            {loading ? 'Checking...' : 'Get Started 🚀'}
           </button>
           <div className="sg-privacy">🔒 Your data is safe. We never spam.</div>
         </div>
