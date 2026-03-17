@@ -65,6 +65,10 @@ export default function App() {
   const remaining     = Math.max(0, TRUSTED_THRESHOLD - resolvedCount)
 
   useEffect(() => {
+    // Force html+body to fill screen with no overflow
+    document.documentElement.style.cssText = 'height:100%;background:#0D0D0D;overflow-x:hidden;'
+    document.body.style.cssText = 'height:100%;background:#0D0D0D;margin:0;padding:0;overflow-x:hidden;'
+
     const saved = localStorage.getItem('nagrik_user')
     if (saved) {
       try {
@@ -217,31 +221,35 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-        body {
-          background: #0D0D0D;
-          min-height: 100dvh;
-        }
-
-        /* ── PC: two-column layout ── */
-        .app-shell {
-          display: flex;
-          min-height: 100dvh;
-          background: #0D0D0D;
-        }
-
-        /* Left sidebar — only on PC */
-        .app-sidebar {
-          display: none;
-        }
-
-        /* Main content column */
-        .app {
-          flex: 1;
-          max-width: 480px;
+        html, body {
+          height: 100%;
           width: 100%;
-          margin: 0 auto;
+          background: #0D0D0D;
+          overflow-x: hidden;
+        }
+
+        #root {
+          height: 100%;
+          background: #0D0D0D;
+        }
+
+        /* ── Full screen shell ── */
+        .app-shell {
+          width: 100%;
+          min-height: 100vh;
+          min-height: 100dvh;
+          background: #0D0D0D;
+          display: flex;
+          justify-content: center;
+        }
+
+        /* ── Main column ── */
+        .app {
+          width: 100%;
+          max-width: 480px;
+          min-height: 100vh;
           min-height: 100dvh;
           background: #0D0D0D;
           color: #fff;
@@ -250,87 +258,24 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
           flex-direction: column;
         }
 
-        /* PC styles */
-        @media (min-width: 900px) {
-          .app-shell {
-            background: #080808;
-          }
-          .app-sidebar {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: flex-end;
-            padding: 40px;
-            flex: 1;
-          }
-          .app-sidebar-inner {
-            max-width: 340px;
-            text-align: right;
-          }
-          .app-sidebar-logo {
-            font-family: 'Syne', sans-serif;
-            font-size: 42px;
-            font-weight: 800;
-            color: #fff;
-            line-height: 1;
-            margin-bottom: 16px;
-          }
-          .app-sidebar-logo span { color: #FF6B00; }
-          .app-sidebar-tagline {
-            font-size: 15px;
-            color: #333;
-            line-height: 1.7;
-            margin-bottom: 32px;
-          }
-          .app-sidebar-stats {
-            display: flex;
-            gap: 20px;
-            justify-content: flex-end;
-          }
-          .app-sidebar-stat {
-            text-align: center;
-            background: #141414;
-            border: 1px solid #1E1E1E;
-            border-radius: 14px;
-            padding: 14px 20px;
-          }
-          .app-sidebar-stat-num {
-            font-family: 'Syne', sans-serif;
-            font-size: 22px;
-            font-weight: 800;
-            color: #FF6B00;
-          }
-          .app-sidebar-stat-label {
-            font-size: 11px;
-            color: #444;
-            margin-top: 3px;
-          }
-          .app {
-            max-width: 440px;
-            border-left: 1px solid #141414;
-            border-right: 1px solid #141414;
-            margin: 0;
-          }
-          .app-right-fill {
-            flex: 1;
-            min-width: 200px;
-          }
+        /* PC: show border, sidebar info */
+        @media (min-width: 768px) {
+          .app-shell { background: #080808; align-items: stretch; }
+          .app { border-left: 1px solid #181818; border-right: 1px solid #181818; }
         }
 
         /* ── Header ── */
         .hdr {
-          padding: 16px 16px 0;
+          padding: 14px 16px 0;
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 8px;
-          flex-wrap: nowrap;
+          gap: 6px;
         }
         .logo {
           font-family: 'Syne', sans-serif;
-          font-size: 22px;
+          font-size: 20px;
           font-weight: 800;
-          letter-spacing: -0.5px;
           flex-shrink: 0;
         }
         .logo span { color: #FF6B00; }
@@ -338,357 +283,208 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
         .hdr-right {
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 5px;
+          min-width: 0;
           flex-shrink: 0;
-          overflow: hidden;
         }
 
-        .step-dots {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          flex-shrink: 0;
-        }
-        .sd { width: 6px; height: 6px; border-radius: 3px; background: #222; transition: all 0.3s; }
-        .sd.active { width: 16px; background: #FF6B00; }
+        .step-dots { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+        .sd { width: 5px; height: 5px; border-radius: 3px; background: #222; transition: all 0.3s; }
+        .sd.active { width: 14px; background: #FF6B00; }
         .sd.done { background: #34C759; }
 
-        /* User chip — compact on mobile */
         .user-chip {
           background: #1A1A1A;
           border: 1px solid #242424;
           border-radius: 100px;
-          padding: 5px 10px 5px 5px;
+          padding: 4px 10px 4px 4px;
           display: flex;
           align-items: center;
           gap: 5px;
           cursor: pointer;
           transition: border-color 0.2s;
           flex-shrink: 0;
-          max-width: 120px;
-          overflow: hidden;
         }
         .user-chip:hover { border-color: #FF6B00; }
-        .user-chip.trusted-chip { border-color: #34C75940; }
-        .user-chip.trusted-chip:hover { border-color: #34C759; }
+        .user-chip.trusted-chip { border-color: #34C75950; }
 
         .user-av {
-          width: 24px; height: 24px;
-          background: #FF6B00;
-          border-radius: 50%;
+          width: 22px; height: 22px;
+          background: #FF6B00; border-radius: 50%;
           display: flex; align-items: center; justify-content: center;
-          font-size: 11px; font-weight: 800;
-          flex-shrink: 0;
+          font-size: 10px; font-weight: 800; flex-shrink: 0;
         }
-        .user-nm {
-          font-size: 12px; font-weight: 600; color: #bbb;
+        .user-nm { font-size: 12px; font-weight: 600; color: #bbb; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        .trusted-pill {
+          background: #34C75918; color: #34C759;
+          border: 1px solid #34C75940;
+          border-radius: 20px; padding: 3px 7px;
+          font-size: 9px; font-weight: 700;
+          white-space: nowrap; flex-shrink: 0;
+        }
+
+        /* ── Welcome bar ── */
+        .welcome {
+          margin: 10px 14px 0;
+          padding: 8px 12px;
+          background: #FF6B000D; border: 1px solid #FF6B0025;
+          border-radius: 10px; font-size: 12px; color: #FF6B00;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
 
-        /* Trusted badge — separate pill, not inside chip on mobile */
-        .trusted-pill {
-          background: #34C75918;
-          color: #34C759;
-          border: 1px solid #34C75935;
-          border-radius: 20px;
-          padding: 3px 8px;
-          font-size: 10px;
-          font-weight: 700;
-          white-space: nowrap;
-          flex-shrink: 0;
-        }
-
-        /* ── Welcome + location ── */
-        .welcome {
-          margin: 10px 16px 4px;
-          padding: 9px 14px;
-          background: #FF6B000D;
-          border: 1px solid #FF6B0025;
-          border-radius: 10px;
-          font-size: 13px;
-          color: #FF6B00;
-        }
+        /* ── Location bar ── */
         .loc-bar {
-          margin: 8px 16px;
-          background: #1A1A1A;
-          border: 1px solid #222;
-          border-radius: 12px;
-          padding: 10px 14px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
+          margin: 8px 14px 0;
+          background: #1A1A1A; border: 1px solid #222;
+          border-radius: 12px; padding: 9px 12px;
+          display: flex; align-items: center; gap: 8px;
         }
         .loc-dot {
-          width: 8px; height: 8px;
-          border-radius: 50%;
-          background: #34C759;
-          animation: pulse 2s infinite;
-          flex-shrink: 0;
+          width: 7px; height: 7px; border-radius: 50%;
+          background: #34C759; animation: pulse 2s infinite; flex-shrink: 0;
         }
         .loc-dot.detecting { background: #FF9500; }
-        @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.55;transform:scale(1.25)} }
-        .loc-text { font-size: 13px; color: #888; flex: 1; min-width: 0; }
+        @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.6;transform:scale(1.3)} }
+        .loc-text { font-size: 12px; color: #888; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .loc-text strong { color: #fff; }
         .ward-pill {
-          background: #FF6B0018;
-          border: 1px solid #FF6B0040;
-          color: #FF6B00;
-          font-size: 11px; font-weight: 700;
-          padding: 3px 8px;
-          border-radius: 7px;
-          white-space: nowrap;
-          flex-shrink: 0;
+          background: #FF6B0018; border: 1px solid #FF6B0040;
+          color: #FF6B00; font-size: 10px; font-weight: 700;
+          padding: 2px 7px; border-radius: 6px; white-space: nowrap; flex-shrink: 0;
         }
 
-        /* ── Upload step ── */
+        /* ── Upload step — fills remaining screen ── */
         .upload-wrap {
-          padding: 8px 16px 24px;
           flex: 1;
+          padding: 10px 14px 14px;
           display: flex;
           flex-direction: column;
         }
         .upload-card {
+          flex: 1;
           background: #141414;
           border: 2px dashed #252525;
-          border-radius: 24px;
-          padding: 32px 20px;
-          text-align: center;
-          position: relative;
-          overflow: hidden;
-          flex: 1;
+          border-radius: 20px;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          min-height: 300px;
+          padding: 24px 20px;
+          position: relative;
+          overflow: hidden;
+          text-align: center;
         }
         .upload-card::before {
           content:''; position:absolute; inset:0;
-          background: radial-gradient(circle at 50% 40%, #FF6B000A 0%, transparent 65%);
+          background: radial-gradient(circle at 50% 45%, #FF6B000B 0%, transparent 60%);
           pointer-events:none;
         }
-        .upload-icon { font-size: 52px; display: block; margin-bottom: 14px; }
-        .upload-title {
-          font-family: 'Syne', sans-serif;
-          font-size: clamp(18px, 4vw, 24px);
-          font-weight: 800;
-          margin-bottom: 8px;
-        }
-        .upload-sub {
-          font-size: clamp(12px, 2.5vw, 14px);
-          color: #555;
-          margin-bottom: 24px;
-          line-height: 1.6;
-          max-width: 280px;
-        }
+        .upload-icon { font-size: 48px; margin-bottom: 12px; display: block; }
+        .upload-title { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; margin-bottom: 8px; }
+        .upload-sub { font-size: 13px; color: #555; margin-bottom: 24px; line-height: 1.6; max-width: 260px; }
         .cam-label {
-          display: inline-block;
-          background: #FF6B00;
-          color: #fff;
-          padding: 14px 32px;
-          border-radius: 14px;
-          font-size: clamp(14px, 3vw, 16px);
-          font-weight: 700;
-          cursor: pointer;
-          transition: background 0.2s;
-          position: relative;
+          background: #FF6B00; color: #fff;
+          padding: 14px 28px; border-radius: 14px;
+          font-size: 15px; font-weight: 700;
+          cursor: pointer; transition: background 0.2s;
+          position: relative; display: inline-block;
         }
         .cam-label:hover { background: #E55A00; }
         .cam-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-        .preview-img { width: 100%; border-radius: 14px; margin-top: 16px; display: block; }
+        .preview-img { width: 100%; border-radius: 12px; margin-top: 14px; display: block; max-height: 200px; object-fit: cover; }
         .ai-loading {
-          display: inline-flex; align-items: center; gap: 10px;
+          display: inline-flex; align-items: center; gap: 8px;
           background: #1E1E1E; border: 1px solid #2A2A2A;
-          padding: 11px 20px; border-radius: 100px; margin-top: 14px;
+          padding: 10px 18px; border-radius: 100px; margin-top: 12px;
         }
-        .spin {
-          width: 16px; height: 16px;
-          border: 2px solid #2A2A2A; border-top-color: #FF6B00;
-          border-radius: 50%;
-          animation: sp 0.8s linear infinite;
-        }
+        .spin { width: 14px; height: 14px; border: 2px solid #2A2A2A; border-top-color: #FF6B00; border-radius: 50%; animation: sp 0.8s linear infinite; }
         @keyframes sp { to { transform: rotate(360deg); } }
-        .ai-txt { font-size: 13px; color: #888; }
+        .ai-txt { font-size: 12px; color: #888; }
         .photo-error {
-          margin: 12px 0 0;
+          margin-top: 10px;
           background: #FF3B3012; border: 1px solid #FF3B3035;
-          color: #FF3B30; padding: 13px 16px;
-          border-radius: 14px; font-size: 14px; line-height: 1.6; text-align: center;
+          color: #FF3B30; padding: 12px 14px;
+          border-radius: 12px; font-size: 13px; line-height: 1.6; text-align: center;
         }
-        .photo-error-icon { font-size: 28px; display: block; margin-bottom: 6px; }
+        .photo-error-icon { font-size: 24px; display: block; margin-bottom: 5px; }
 
         /* ── Result step ── */
-        .result-wrap { padding: 0 16px 24px; }
-        .sec-label {
-          font-size: 11px; color: #555;
-          letter-spacing: 2px; text-transform: uppercase;
-          margin-bottom: 10px; font-weight: 600;
-        }
-        .issue-card {
-          background: #141414; border-radius: 20px;
-          overflow: hidden; margin-bottom: 12px; border: 1px solid #1E1E1E;
-        }
-        .issue-hdr { padding: 16px; display: flex; align-items: flex-start; gap: 14px; }
-        .issue-ico {
-          width: 48px; height: 48px; border-radius: 14px;
-          background: #1E1E1E; display: flex; align-items: center;
-          justify-content: center; font-size: 22px; flex-shrink: 0;
-        }
+        .result-wrap { padding: 0 14px 24px; overflow-y: auto; }
+        .sec-label { font-size: 10px; color: #555; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; font-weight: 600; }
+        .issue-card { background: #141414; border-radius: 18px; overflow: hidden; margin-bottom: 10px; border: 1px solid #1E1E1E; }
+        .issue-hdr { padding: 14px; display: flex; align-items: flex-start; gap: 12px; }
+        .issue-ico { width: 44px; height: 44px; border-radius: 12px; background: #1E1E1E; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
         .issue-info { flex: 1; }
-        .issue-type { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 800; margin-bottom: 4px; }
-        .issue-desc { font-size: 13px; color: #777; line-height: 1.55; }
-        .sev-tag {
-          display: inline-flex; align-items: center; gap: 5px;
-          padding: 4px 12px; border-radius: 100px;
-          font-size: 12px; font-weight: 700; margin-top: 9px;
-        }
+        .issue-type { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 800; margin-bottom: 3px; }
+        .issue-desc { font-size: 12px; color: #777; line-height: 1.5; }
+        .sev-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 100px; font-size: 11px; font-weight: 700; margin-top: 7px; }
         .divider { height: 1px; background: #1E1E1E; }
-        .loc-info { padding: 12px 16px; display: flex; align-items: center; gap: 12px; }
-        .loc-info-ico { font-size: 18px; }
+        .loc-info { padding: 11px 14px; display: flex; align-items: center; gap: 10px; }
+        .loc-info-ico { font-size: 16px; }
         .loc-info-det { flex: 1; }
-        .loc-area { font-size: 14px; font-weight: 600; }
-        .loc-ward { font-size: 12px; color: #555; margin-top: 2px; }
-        .loc-covers { font-size: 11px; color: #3A3A3A; margin-top: 3px; }
-        .officer-bar {
-          background: #141414; border: 1px solid #1E1E1E;
-          border-radius: 14px; padding: 12px 14px;
-          margin-bottom: 12px; display: flex; align-items: center; gap: 12px;
-        }
-        .officer-av {
-          width: 36px; height: 36px; background: #1E1E1E;
-          border-radius: 50%; display: flex; align-items: center;
-          justify-content: center; font-size: 16px; flex-shrink: 0;
-        }
-        .officer-name { font-size: 13px; font-weight: 700; }
-        .officer-desig { font-size: 11px; color: #555; margin-top: 2px; }
-        .addr-wrap { margin-bottom: 12px; }
-        .addr-box {
-          background: #141414; border: 1.5px solid #252525;
-          border-radius: 16px; padding: 14px 16px; transition: border-color 0.2s;
-        }
+        .loc-area { font-size: 13px; font-weight: 600; }
+        .loc-ward { font-size: 11px; color: #555; margin-top: 2px; }
+        .loc-covers { font-size: 10px; color: #3A3A3A; margin-top: 2px; }
+        .officer-bar { background: #141414; border: 1px solid #1E1E1E; border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+        .officer-av { width: 34px; height: 34px; background: #1E1E1E; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+        .officer-name { font-size: 12px; font-weight: 700; }
+        .officer-desig { font-size: 10px; color: #555; margin-top: 2px; }
+        .addr-wrap { margin-bottom: 10px; }
+        .addr-box { background: #141414; border: 1.5px solid #252525; border-radius: 14px; padding: 12px 14px; transition: border-color 0.2s; }
         .addr-box:focus-within { border-color: #FF6B00; }
-        .addr-lbl {
-          font-size: 10px; color: #FF6B00; letter-spacing: 1.5px;
-          text-transform: uppercase; font-weight: 700; margin-bottom: 8px;
-        }
-        .addr-input {
-          width: 100%; background: transparent; border: none;
-          color: #ddd; font-size: 14px; font-family: 'DM Sans', sans-serif;
-          outline: none; resize: none; line-height: 1.65;
-        }
+        .addr-lbl { font-size: 9px; color: #FF6B00; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700; margin-bottom: 6px; }
+        .addr-input { width: 100%; background: transparent; border: none; color: #ddd; font-size: 13px; font-family: 'DM Sans', sans-serif; outline: none; resize: none; line-height: 1.6; }
         .addr-input::placeholder { color: #333; }
-        .addr-hint { font-size: 11px; color: #3A3A3A; margin-top: 8px; line-height: 1.5; }
-        .map-wrap { border-radius: 18px; overflow: hidden; margin-bottom: 12px; }
-        .action-btn {
-          width: 100%; padding: 15px; border: none; border-radius: 16px;
-          font-size: 15px; font-weight: 700; cursor: pointer;
-          font-family: 'DM Sans', sans-serif;
-          display: flex; align-items: center; justify-content: center; gap: 8px;
-          transition: all 0.2s; background: #FF6B00; color: #fff;
-        }
-        .action-btn:hover:not(:disabled) { background: #E55A00; transform: translateY(-1px); }
+        .addr-hint { font-size: 10px; color: #3A3A3A; margin-top: 6px; line-height: 1.5; }
+        .map-wrap { border-radius: 16px; overflow: hidden; margin-bottom: 10px; }
+        .action-btn { width: 100%; padding: 14px; border: none; border-radius: 14px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: 'DM Sans', sans-serif; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s; background: #FF6B00; color: #fff; }
+        .action-btn:hover:not(:disabled) { background: #E55A00; }
         .action-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
-        /* ── Profile sheet ── */
-        .profile-overlay {
-          position: fixed; inset: 0;
-          background: rgba(0,0,0,0.82); z-index: 999;
-          display: flex; align-items: flex-end;
+        /* ── Profile ── */
+        .profile-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 999; display: flex; align-items: flex-end; }
+        .profile-sheet { background: #0F0F0F; border-radius: 24px 24px 0 0; padding: 22px 18px 40px; width: 100%; max-height: 88dvh; overflow-y: auto; }
+        @media (min-width: 768px) {
+          .profile-overlay { align-items: center; justify-content: center; }
+          .profile-sheet { border-radius: 20px; max-width: 460px; }
         }
-        .profile-sheet {
-          background: #0F0F0F; border-radius: 28px 28px 0 0;
-          padding: 24px 20px 44px; width: 100%;
-          max-height: 88dvh; overflow-y: auto;
-        }
-        @media (min-width: 900px) {
-          .profile-overlay { justify-content: center; align-items: center; }
-          .profile-sheet {
-            border-radius: 24px;
-            max-width: 480px;
-            max-height: 80dvh;
-          }
-        }
-        .profile-hdr { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 20px; }
-        .profile-av {
-          width: 50px; height: 50px; background: #FF6B00;
-          border-radius: 50%; display: flex; align-items: center;
-          justify-content: center; font-size: 21px; font-weight: 800; flex-shrink: 0;
-        }
-        .profile-name { font-family: 'Syne', sans-serif; font-size: 19px; font-weight: 800; }
-        .profile-meta { font-size: 12px; color: #444; margin-top: 3px; }
-        .profile-count { font-size: 12px; color: #FF6B00; margin-top: 4px; font-weight: 600; }
-        .trusted-badge-block {
-          margin-top: 8px; background: #1A1A1A;
-          border: 1px solid #252525; border-radius: 12px; padding: 10px 14px;
-        }
+        .profile-hdr { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+        .profile-av { width: 46px; height: 46px; background: #FF6B00; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 19px; font-weight: 800; flex-shrink: 0; }
+        .profile-name { font-family: 'Syne', sans-serif; font-size: 17px; font-weight: 800; }
+        .profile-meta { font-size: 11px; color: #444; margin-top: 3px; }
+        .profile-count { font-size: 11px; color: #FF6B00; margin-top: 3px; font-weight: 600; }
+        .trusted-badge-block { margin-top: 8px; background: #1A1A1A; border: 1px solid #252525; border-radius: 10px; padding: 9px 12px; }
         .trusted-badge-block.earned { background: #34C75912; border-color: #34C75935; }
-        .trusted-badge-title {
-          font-size: 13px; font-weight: 700; color: #555;
-          display: flex; align-items: center; gap: 6px;
-        }
+        .trusted-badge-title { font-size: 12px; font-weight: 700; color: #555; display: flex; align-items: center; gap: 5px; }
         .trusted-badge-title.earned { color: #34C759; }
-        .trusted-badge-sub { font-size: 11px; color: #34C75990; margin-top: 3px; }
-        .trusted-badge-progress { margin-top: 8px; }
-        .trusted-badge-bar { height: 4px; border-radius: 2px; background: #2A2A2A; overflow: hidden; }
+        .trusted-badge-sub { font-size: 10px; color: #34C75990; margin-top: 3px; }
+        .trusted-badge-progress { margin-top: 7px; }
+        .trusted-badge-bar { height: 3px; border-radius: 2px; background: #2A2A2A; overflow: hidden; }
         .trusted-badge-fill { height: 100%; border-radius: 2px; background: #34C759; transition: width 0.4s; }
-        .trusted-badge-hint { font-size: 10px; color: #444; margin-top: 4px; }
-        .profile-close {
-          margin-left: auto; background: #1A1A1A; border: none; color: #666;
-          width: 32px; height: 32px; border-radius: 50%; cursor: pointer;
-          font-size: 15px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-        }
-        .c-card {
-          background: #161616; border: 1px solid #1E1E1E;
-          border-radius: 16px; padding: 14px 15px; margin-bottom: 10px;
-        }
-        .c-card-hdr { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-        .c-ico { font-size: 20px; }
-        .c-type { font-size: 14px; font-weight: 700; flex: 1; }
-        .c-sev { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 6px; }
-        .c-id { font-size: 11px; color: #3A3A3A; font-family: monospace; margin-bottom: 6px; }
-        .c-address { font-size: 12px; color: #666; margin-bottom: 5px; }
-        .c-desc { font-size: 12px; color: #555; line-height: 1.5; margin-bottom: 6px; }
-        .c-meta { font-size: 11px; color: #3A3A3A; display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
-        .c-status {
-          display: inline-block; background: #FF6B0015; color: #FF6B00;
-          padding: 2px 9px; border-radius: 6px; font-size: 11px; font-weight: 600;
-        }
-        .c-track { font-size: 11px; color: #FF6B00; cursor: pointer; margin-top: 4px; }
+        .trusted-badge-hint { font-size: 10px; color: #444; margin-top: 3px; }
+        .profile-close { margin-left: auto; background: #1A1A1A; border: none; color: #666; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .c-card { background: #161616; border: 1px solid #1E1E1E; border-radius: 14px; padding: 12px 13px; margin-bottom: 8px; }
+        .c-card-hdr { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+        .c-ico { font-size: 18px; }
+        .c-type { font-size: 13px; font-weight: 700; flex: 1; }
+        .c-sev { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+        .c-id { font-size: 10px; color: #3A3A3A; font-family: monospace; margin-bottom: 5px; }
+        .c-address { font-size: 11px; color: #666; margin-bottom: 4px; }
+        .c-desc { font-size: 11px; color: #555; line-height: 1.5; margin-bottom: 5px; }
+        .c-meta { font-size: 10px; color: #3A3A3A; display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 5px; }
+        .c-status { display: inline-block; background: #FF6B0015; color: #FF6B00; padding: 2px 8px; border-radius: 5px; font-size: 10px; font-weight: 600; }
+        .c-track { font-size: 10px; color: #FF6B00; cursor: pointer; margin-top: 3px; }
         .c-track:hover { text-decoration: underline; }
-        .empty-state { text-align: center; padding: 48px 20px; color: #333; }
-        .logout-btn {
-          width: 100%; margin-top: 16px; padding: 13px;
-          background: transparent; border: 1px solid #1E1E1E;
-          color: #444; border-radius: 14px; cursor: pointer;
-          font-family: 'DM Sans', sans-serif; font-size: 14px; transition: all 0.2s;
-        }
+        .empty-state { text-align: center; padding: 40px 20px; color: #333; }
+        .logout-btn { width: 100%; margin-top: 14px; padding: 12px; background: transparent; border: 1px solid #1E1E1E; color: #444; border-radius: 12px; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 13px; transition: all 0.2s; }
         .logout-btn:hover { border-color: #FF3B30; color: #FF3B30; }
       `}</style>
 
       <div className="app-shell">
-        {/* PC left sidebar */}
-        <div className="app-sidebar">
-          <div className="app-sidebar-inner">
-            <div className="app-sidebar-logo">Nagrik<span>AI</span></div>
-            <div className="app-sidebar-tagline">
-              Mumbai ki awaaz,<br />AI ki taakat.<br /><br />
-              Civic issues report karo,<br />BMC ko jawabdeh banao.
-            </div>
-            <div className="app-sidebar-stats">
-              <div className="app-sidebar-stat">
-                <div className="app-sidebar-stat-num">{complaints.length}</div>
-                <div className="app-sidebar-stat-label">My Reports</div>
-              </div>
-              <div className="app-sidebar-stat">
-                <div className="app-sidebar-stat-num">{resolvedCount}</div>
-                <div className="app-sidebar-stat-label">Resolved</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Main app column */}
         <div className="app">
+
+          {/* Header */}
           <div className="hdr">
             <div className="logo">Nagrik<span>AI</span></div>
             <div className="hdr-right">
@@ -706,8 +502,10 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
             </div>
           </div>
 
+          {/* Welcome */}
           {step === 1 && <div className="welcome">{t('welcome', user.firstName)}</div>}
 
+          {/* Location */}
           <div className="loc-bar">
             <div className={`loc-dot ${!location ? 'detecting' : ''}`} />
             <div className="loc-text">
@@ -716,6 +514,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
             {location && <div className="ward-pill">{t('ward')} {location.ward.ward}</div>}
           </div>
 
+          {/* Step 1 — Upload */}
           {step === 1 && (
             <div className="upload-wrap">
               <div className="upload-card">
@@ -728,7 +527,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
                 </label>
                 {preview && <img src={preview} className="preview-img" alt="Preview" />}
                 {loading && (
-                  <div style={{ textAlign: 'center', paddingTop: 16 }}>
+                  <div style={{ textAlign: 'center', paddingTop: 14 }}>
                     <div className="ai-loading">
                       <div className="spin" />
                       <span className="ai-txt">{t('aiAnalyzing')}</span>
@@ -745,6 +544,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
             </div>
           )}
 
+          {/* Step 2 — Result */}
           {step === 2 && result && location && (
             <div className="result-wrap">
               <div className="sec-label">{t('aiDetection')}</div>
@@ -783,7 +583,7 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
               <div className="addr-wrap">
                 <div className="addr-box">
                   <div className="addr-lbl">📍 Address Details</div>
-                  <textarea className="addr-input" rows={3} placeholder={t('addressPlaceholder')} value={addressInput} onChange={e => setAddressInput(e.target.value)} />
+                  <textarea className="addr-input" rows={2} placeholder={t('addressPlaceholder')} value={addressInput} onChange={e => setAddressInput(e.target.value)} />
                   <div className="addr-hint">{t('addressHint')}</div>
                 </div>
               </div>
@@ -795,34 +595,34 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
 
               {checkingDuplicate ? (
                 <div style={{ textAlign: 'center', paddingTop: 8 }}>
-                  <div className="ai-loading" style={{ width: '100%', justifyContent: 'center', borderRadius: 16, padding: 15 }}>
+                  <div className="ai-loading" style={{ width: '100%', justifyContent: 'center', borderRadius: 14, padding: 13 }}>
                     <div className="spin" />
                     <span className="ai-txt">{t('checkingDuplicate')}</span>
                   </div>
                 </div>
               ) : supported && existingComplaint ? (
-                <div style={{ background: '#34C75918', border: '1px solid #34C75935', borderRadius: 16, padding: 16 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#34C759', lineHeight: 1.6 }}>
+                <div style={{ background: '#34C75918', border: '1px solid #34C75935', borderRadius: 14, padding: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#34C759', lineHeight: 1.6 }}>
                     {t('supportedMsg', existingComplaint.complaintId)}
                   </div>
-                  <button className="action-btn" style={{ marginTop: 12, background: '#34C759' }}
+                  <button className="action-btn" style={{ marginTop: 10, background: '#34C759' }}
                     onClick={() => window.open(`${window.location.origin}/complaint/${existingComplaint.complaintId}`, '_blank')}>
                     {t('openTrackingLink')}
                   </button>
                 </div>
               ) : existingComplaint && !supported ? (
-                <div style={{ background: '#FF950018', border: '1px solid #FF950035', borderRadius: 16, padding: 16 }}>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: '#FF9500', marginBottom: 6 }}>
+                <div style={{ background: '#FF950018', border: '1px solid #FF950035', borderRadius: 14, padding: 14 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: '#FF9500', marginBottom: 5 }}>
                     {t('duplicateTitle', location.ward.ward)}
                   </div>
-                  <div style={{ fontSize: 13, color: '#bbb', marginBottom: 10 }}>{t('duplicateSub')}</div>
-                  <div style={{ fontSize: 12, color: '#FF9500', fontFamily: 'monospace', marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, color: '#bbb', marginBottom: 8 }}>{t('duplicateSub')}</div>
+                  <div style={{ fontSize: 11, color: '#FF9500', fontFamily: 'monospace', marginBottom: 12 }}>
                     {t('complaintId')}: {existingComplaint.complaintId}
                   </div>
                   <button className="action-btn" onClick={supportExisting} disabled={saving}>
                     {saving ? <><div className="spin" style={{ borderColor: '#ffffff30', borderTopColor: '#fff' }} />{t('saving')}</> : t('supportBtn')}
                   </button>
-                  <button className="action-btn" style={{ marginTop: 10, background: 'transparent', color: '#FF9500', border: '1px solid #FF950035' }}
+                  <button className="action-btn" style={{ marginTop: 8, background: 'transparent', color: '#FF9500', border: '1px solid #FF950035' }}
                     onClick={() => setExistingComplaint(null)}>
                     {t('differentLocation')}
                   </button>
@@ -835,15 +635,15 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
             </div>
           )}
 
+          {/* Step 3 */}
           {step === 3 && result && location && complaintId && (
             <Step3 result={result} location={location} preview={preview} photoDataUrl={photoBase64} user={user} complaintId={complaintId} />
           )}
-        </div>
 
-        {/* PC right fill */}
-        <div className="app-right-fill" />
+        </div>
       </div>
 
+      {/* Profile sheet */}
       {showProfile && (
         <div className="profile-overlay" onClick={() => setShowProfile(false)}>
           <div className="profile-sheet" onClick={e => e.stopPropagation()}>
@@ -882,17 +682,17 @@ Be very strict. When in doubt → NOT_CIVIC_ISSUE`
             <div className="sec-label">{t('myComplaints')}</div>
 
             {loadingComplaints && (
-              <div style={{ textAlign: 'center', padding: '32px 0', color: '#333' }}>
-                <div className="spin" style={{ borderColor: '#1E1E1E', borderTopColor: '#FF6B00', margin: '0 auto 10px', width: 24, height: 24 }} />
+              <div style={{ textAlign: 'center', padding: '28px 0', color: '#333' }}>
+                <div className="spin" style={{ borderColor: '#1E1E1E', borderTopColor: '#FF6B00', margin: '0 auto 10px', width: 22, height: 22 }} />
                 Loading...
               </div>
             )}
 
             {!loadingComplaints && complaints.length === 0 && (
               <div className="empty-state">
-                <div style={{ fontSize: 38, marginBottom: 12 }}>📋</div>
-                <div style={{ fontSize: 14 }}>{t('noComplaints')}</div>
-                <div style={{ fontSize: 12, marginTop: 6, color: '#2A2A2A' }}>{t('noComplaintsSub')}</div>
+                <div style={{ fontSize: 34, marginBottom: 10 }}>📋</div>
+                <div style={{ fontSize: 13 }}>{t('noComplaints')}</div>
+                <div style={{ fontSize: 11, marginTop: 5, color: '#2A2A2A' }}>{t('noComplaintsSub')}</div>
               </div>
             )}
 
